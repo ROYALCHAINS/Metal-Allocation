@@ -1,0 +1,1225 @@
+<script>
+/* ==================================================================
+   Royal Metal Allocation System — Reports.html (Phase 2)
+   Allocation History, Metal Flow History, Analysis Dashboard.
+   Read-only. Independent of the Phase 1 Scripts.html module.
+   ================================================================== */
+(function () {
+  'use strict';
+
+  var R = {
+    options: null,
+    loadedOnce: { allocationHistory: false, flowHistory: false, dashboard: false },
+    lastRows: { allocationHistory: [], flowHistory: [] },
+    offset: { allocationHistory: 0, flowHistory: 0 },
+    busy: false,
+    currentView: 'daily',
+    isAdmin: null
+  };
+
+  /* ------------------------- shared helpers ----------------------- */
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function round3(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return 0;
+    return Math.round((v + Number.EPSILON) * 1000) / 1000;
+  }
+
+  function fmt3(n) { return round3(n).toFixed(3); }
+
+  /* Fixed-decimal string with trailing zeros trimmed. The '.' guard stops
+     a whole number such as 100 from being reduced to 1 by the trim. */
+  function fmtTrim(v, decimals) {
+    var s = v.toFixed(decimals);
+    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s;
+  }
+
+  /*
+   * On-plot value labels.
+   *
+   * Precision follows the magnitude of the figure so that a genuinely small
+   * series stays readable. A party whose allocations clear almost fully each
+   * day carries a closing balance of a few hundred grams, and the previous
+   * '<1' / '>-1' placeholders collapsed every such point to the same string,
+   * which made the trend impossible to read on the plot. Large figures still
+   * print as whole kilograms to keep the labels short.
+   *
+   * Exact three-decimal values remain available in every tooltip, so this
+   * affects presentation only, never the plotted geometry.
+   */
+  function fmt0(n) {
+    var v = Number(n);
+    if (!isFinite(v) || v === 0) return '0';
+
+    var a = Math.abs(v);
+    if (a >= 10) return Math.round(v).toString();
+    if (a >= 1) return fmtTrim(v, 1);
+
+    /* Below 1 kg: three decimals, matching the precision Metal Master stores,
+       so the label never disagrees with the tooltip. Anything under half a
+       gram trims away to a plain zero. */
+    var small = fmtTrim(round3(v), 3);
+    return (small === '0' || small === '-0') ? '0' : small;
+  }
+
+  function fmtPct(n) {
+    var v = Number(n);
+    return (isFinite(v) ? v : 0).toFixed(1) + '%';
+  }
+
+  function shiftIso(iso, days) {
+    var p = String(iso).split('-');
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12, 0, 0);
+    d.setDate(d.getDate() + days);
+    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+    var dd = String(d.getDate()); if (dd.length < 2) dd = '0' + dd;
+    return d.getFullYear() + '-' + m + '-' + dd;
+  }
+
+  function shortDate(dateKey) {
+    var p = String(dateKey).split('-');
+    var mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (p.length !== 3) return String(dateKey);
+    return p[2] + ' ' + (mo[Number(p[1]) - 1] || '');
+  }
+
+  function showOverlay(text) {
+    $('overlayText').textContent = text || 'Loading\u2026';
+    $('overlay').classList.remove('hidden');
+  }
+  function hideOverlay() { $('overlay').classList.add('hidden'); }
+
+  function toast(type, message) {
+    var stack = $('toastStack');
+    var el = document.createElement('div');
+    el.className = 'toast toast--' + (type || 'info');
+    el.textContent = message;
+    stack.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); },
+      type === 'error' ? 9000 : 5000);
+  }
+
+
+  /* --------------------------- view switching --------------------- */
+
+  function switchView(view) {
+    R.currentView = view;
+
+    var tabs = document.querySelectorAll('.nav-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      var active = tabs[i].getAttribute('data-view') === view;
+      tabs[i].classList.toggle('is-active', active);
+      tabs[i].setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+
+    var views = document.querySelectorAll('.view');
+    for (var j = 0; j < views.length; j++) {
+      views[j].classList.toggle('is-active', views[j].id === 'view-' + view);
+    }
+
+    document.body.classList.toggle('view-reports', view !== 'daily');
+    window.scrollTo(0, 0);
+
+    if (view === 'daily') return;
+
+    ensureOptions(function () {
+      if (view === 'allocationHistory' && !R.loadedOnce.allocationHistory) loadAllocationHistory();
+      else if (view === 'flowHistory' && !R.loadedOnce.flowHistory) loadFlowHistory();
+      else if (view === 'dashboard' && !R.loadedOnce.dashboard) loadDashboard();
+    });
+  }
+
+  /* ------------------------ filter option loading ----------------- */
+
+  function ensureOptions(next) {
+    if (R.options) { next(); return; }
+    showOverlay('Loading filter options\u2026');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        hideOverlay();
+        if (!res || !res.ok) {
+          toast('error', (res && res.message) || 'Filter options could not be loaded.');
+          return;
+        }
+        R.options = res.data;
+        populateFilters();
+        next();
+      })
+      .withFailureHandler(function (err) {
+        hideOverlay();
+        toast('error', 'Filter options could not be loaded. Check the connection and retry.');
+        console.error(err);
+      })
+      .getHistoryFilterOptions();
+  }
+
+  function fillSelect(id, items, allLabel) {
+    var el = $(id);
+    if (!el) return;
+    var html = '<option value="all">' + esc(allLabel) + '</option>';
+    items.forEach(function (it) {
+      var label = it.sector || it.label;
+      html += '<option value="' + esc(label) + '">' + esc(label) +
+        (it.active === false ? ' (historical)' : '') + '</option>';
+    });
+    el.innerHTML = html;
+  }
+
+  function populateFilters() {
+    var o = R.options;
+    fillSelect('ahSector', o.allocationSectors, 'All sectors');
+    fillSelect('dbSector', o.allocationSectors, 'All sectors');
+    fillSelect('mfSector', o.flowSectors, 'All sectors');
+
+    ['ah', 'mf', 'db'].forEach(function (p) {
+      if ($(p + 'From')) $(p + 'From').value = o.suggestedFrom || '';
+      if ($(p + 'To')) $(p + 'To').value = o.suggestedTo || '';
+    });
+
+    /* Every view opens on a 7 day horizon, matching the quick-range button
+       marked active in the markup. */
+    if (o.maxDate) {
+      var from7 = shiftIso(o.maxDate, -6);
+      if (o.minDate && from7 < o.minDate) from7 = o.minDate;
+      ['ah', 'mf', 'db'].forEach(function (p) {
+        if (!$(p + 'From')) return;
+        $(p + 'From').value = from7;
+        $(p + 'To').value = o.maxDate;
+      });
+    }
+
+    if (o.allocationRecordCount) {
+      $('tabCountAlloc').textContent = o.allocationRecordCount;
+      $('tabCountAlloc').classList.remove('hidden');
+    }
+    if (o.flowRecordCount) {
+      $('tabCountFlow').textContent = o.flowRecordCount;
+      $('tabCountFlow').classList.remove('hidden');
+    }
+  }
+
+  function applyQuickRange(prefix, days, btn) {
+    var group = btn.parentNode.querySelectorAll('.quick-range__btn');
+    for (var i = 0; i < group.length; i++) group[i].classList.remove('is-active');
+    btn.classList.add('is-active');
+
+    var o = R.options || {};
+    if (Number(days) === 0) {
+      $(prefix + 'From').value = o.minDate || '';
+      $(prefix + 'To').value = o.maxDate || '';
+    } else {
+      var to = o.maxDate || '';
+      if (!to) return;
+      var from = shiftIso(to, -(Number(days) - 1));
+      if (o.minDate && from < o.minDate) from = o.minDate;
+      $(prefix + 'From').value = from;
+      $(prefix + 'To').value = to;
+    }
+  }
+
+  /**
+   * Draws a pager. Paging is server side, so each move refetches one page
+   * rather than holding the whole history in the browser.
+   */
+  function renderPager(prefix, page, onGo) {
+    var info = $(prefix + 'PageInfo');
+    var prev = $(prefix + 'Prev');
+    var next = $(prefix + 'Next');
+    if (!info || !page) return;
+
+    if (!page.totalRecords) {
+      info.textContent = 'No records';
+      prev.disabled = true;
+      next.disabled = true;
+      return;
+    }
+
+    info.textContent = 'Showing ' + page.firstRecord + '\u2013' + page.lastRecord +
+      ' of ' + page.totalRecords + '  \u00B7  Page ' + page.currentPage + ' of ' + page.totalPages;
+    prev.disabled = !page.hasPrevious;
+    next.disabled = !page.hasNext;
+
+    prev.onclick = function () { if (page.hasPrevious) onGo(page.offset - page.pageSize); };
+    next.onclick = function () { if (page.hasNext) onGo(page.offset + page.pageSize); };
+  }
+
+  /* ---------------------- Allocation History ---------------------- */
+
+  /**
+   * Counts how many controls are away from their default, for the
+   * "Applied: N filters active" readout in each toolbar header. The date
+   * pair counts as one filter, since it is always set together.
+   */
+  function updateFilterCount(countId, dateIds, selectIds) {
+    var node = $(countId);
+    if (!node) return;
+    var n = 0;
+    if (dateIds.some(function (id) { return $(id) && $(id).value; })) n++;
+    selectIds.forEach(function (id) {
+      var el = $(id);
+      if (el && el.value && el.value !== 'all') n++;
+    });
+    node.textContent = n === 0 ? 'No filters active'
+      : (n + ' filter' + (n === 1 ? '' : 's') + ' active');
+  }
+
+  function allocationFilters() {
+    updateFilterCount('ahFilterCount', ['ahFrom', 'ahTo'], ['ahSector', 'ahStatus']);
+    var sector = $('ahSector').value;
+    var purity = 'all';   // the Purity filter was removed
+    return {
+      fromDate: $('ahFrom').value,
+      toDate: $('ahTo').value,
+      sectors: sector === 'all' ? null : [sector],
+      purities: purity === 'all' ? null : [purity],
+      status: $('ahStatus').value,
+      search: ''            // the Search field was removed
+    };
+  }
+
+  function loadAllocationHistory() {
+    if (R.busy) return;
+    R.busy = true;
+    showOverlay('Loading allocation history\u2026');
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        R.busy = false;
+        hideOverlay();
+        if (!res || !res.ok) {
+          toast('error', (res && res.message) || 'The history could not be loaded.');
+          return;
+        }
+        R.loadedOnce.allocationHistory = true;
+        R.lastRows.allocationHistory = res.data.rows;
+        renderAllocationHistory(res.data);
+      })
+      .withFailureHandler(function (err) {
+        R.busy = false;
+        hideOverlay();
+        toast('error', 'The history could not be loaded. Check the connection and retry.');
+        console.error(err);
+      })
+      .getAllocationHistory(allocationFilters());
+  }
+
+  function renderAllocationHistory(data) {
+    var s = data.summary;
+    $('ahStatRecords').textContent = s.recordCount;
+    $('ahStatDates').textContent = s.dateCount + ' dates \u00B7 ' + s.sectorCount + ' sectors';
+    $('ahStatPrev').textContent = fmt3(s.totals.previousRequirement);
+    $('ahStatRequired').textContent = fmt3(s.totals.todayRequired);
+    $('ahStatAlloted').textContent = fmt3(s.totals.alloted);
+    $('ahStatFulfil').textContent = fmtPct(s.fulfilmentRate || 0);
+    var ahPeak = s.peakBalance || {};
+    $('ahStatPeak').textContent = 'Trajectory peak: ' + fmt3(ahPeak.value || 0) + ' kg' +
+      (ahPeak.dateDisplay ? ' on ' + ahPeak.dateDisplay : '');
+    $('ahStatBalance').textContent = fmt3(s.totals.balance);
+    $('ahRowChip').textContent = s.recordCount + ' rows';
+    renderPager('ah', data.page, function (offset) {
+      R.offset.allocationHistory = offset;
+      loadAllocationHistory();
+    });
+
+    var html = data.rows.map(function (r) {
+      var pending = r.balance > 0;
+      return '<tr>' +
+        '<td class="date-cell" data-label="Date">' + esc(r.dateDisplay) + '</td>' +
+        '<td data-label="Sector">' + esc(r.sector) + '</td>' +
+        '<td data-label="Purity">' + esc(r.purity) + '</td>' +
+        '<td class="num" data-label="Prev. Requirement">' + fmt3(r.previousRequirement) + '</td>' +
+        '<td class="num" data-label="Today\u2019s Required">' + fmt3(r.todayRequired) + '</td>' +
+        '<td class="num" data-label="Alloted">' + fmt3(r.alloted) + '</td>' +
+        '<td class="num" data-label="Balance">' + fmt3(r.balance) + '</td>' +
+        '<td data-label="Status"><span class="' + (pending ? 'pill-pending' : 'pill-cleared') + '">' +
+          (pending ? 'Pending' : 'Cleared') + '</span></td>' +
+      '</tr>';
+    }).join('');
+
+    $('ahBody').innerHTML = html;
+    $('ahEmpty').classList.toggle('hidden', data.rows.length > 0);
+    $('ahTable').classList.toggle('hidden', data.rows.length === 0);
+
+    var trunc = $('ahTruncated');
+    if (s.truncated) {
+      trunc.textContent = 'Showing the first ' + s.returnedCount + ' of ' + s.recordCount +
+        ' matching records. Narrow the date range or filters to see the rest.';
+      trunc.classList.remove('hidden');
+    } else {
+      trunc.classList.add('hidden');
+    }
+  }
+
+  /* ---------------------- Metal Flow History ---------------------- */
+
+  function flowFilters() {
+    updateFilterCount('mfFilterCount', ['mfFrom', 'mfTo'], ['mfSector']);
+    var sector = $('mfSector').value;
+    return {
+      fromDate: $('mfFrom').value,
+      toDate: $('mfTo').value,
+      sectors: sector === 'all' ? null : [sector],
+      status: 'all',            // the Acquired Status filter was removed
+      search: '',           // the Search field was removed
+      offset: R.offset.flowHistory
+    };
+  }
+
+  function loadFlowHistory() {
+    if (R.busy) return;
+    R.busy = true;
+    showOverlay('Loading Metal Flow history\u2026');
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        R.busy = false;
+        hideOverlay();
+        if (!res || !res.ok) {
+          toast('error', (res && res.message) || 'The Metal Flow history could not be loaded.');
+          return;
+        }
+        R.loadedOnce.flowHistory = true;
+        R.lastRows.flowHistory = res.data.rows;
+        R.flowSeries = res.data.series || null;
+        renderFlowHistory(res.data);
+      })
+      .withFailureHandler(function (err) {
+        R.busy = false;
+        hideOverlay();
+        toast('error', 'The Metal Flow history could not be loaded. Check the connection and retry.');
+        console.error(err);
+      })
+      .getMetalFlowHistory(flowFilters());
+  }
+
+  /**
+   * Metal Flow History is chart-only. The per-sector table and its pager were
+   * removed, so everything drawn here comes from data.series, which the server
+   * builds from every matched record rather than from the current page.
+   */
+  function renderFlowHistory(data) {
+    var s = data.summary;
+    var series = data.series || { dates: [], displays: [], sectors: [], grandTotal: 0 };
+
+    $('mfStatRecords').textContent = s.recordCount;
+    $('mfStatDates').textContent = s.dateCount + ' dates';
+    $('mfStatTotal').textContent = fmt3(s.totalAcquired);
+    renderCycleDelta($('mfStatTotalSub'), s.cycle || {});
+    $('mfStatAvg').textContent = fmt3(s.averagePerDay);
+    $('mfStatSectors').textContent = s.sectorCount;
+    var hm0 = data.heatmap || {};
+    var pk = hm0.peak || {}, tp = hm0.mostActive || {};
+    $('mfHeatPeak').textContent = fmt3(pk.acquired || 0);
+    $('mfHeatPeakSub').textContent = pk.sector ? (pk.sector + ' \u00b7 ' + pk.fullDateLabel) : '\u2014';
+    $('mfHeatTop').textContent = tp.sector || '\u2014';
+    $('mfHeatTopSub').textContent = tp.sector
+      ? (fmt3(tp.total) + ' kg \u00b7 ' + fmtPct(tp.percent)) : '\u2014';
+    $('mfRowChip').textContent = s.recordCount + ' records';
+    $('mfShareChip').textContent = fmt3(series.grandTotal) + ' kg total';
+
+    renderFlowHeatmap('mf', data.heatmap);
+    sectorShareChart($('mfShareChart'), series);
+  }
+
+  /* ------------------------- SVG chart helpers -------------------- */
+
+  function emptyChart(el, message) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-state__title">No data</div>' +
+      '<div class="empty-state__text">' + esc(message) + '</div></div>';
+  }
+
+  function niceMax(value) {
+    if (!(value > 0)) return 1;
+    var exp = Math.pow(10, Math.floor(Math.log(value) / Math.LN10));
+    var norm = value / exp;
+    var step = norm <= 1 ? 1 : (norm <= 2 ? 2 : (norm <= 5 ? 5 : 10));
+    return step * exp;
+  }
+
+  /**
+   * Grouped vertical bar chart, styled to Metal_Allocation_UI.txt: emerald
+   * bars for acquired, navy for alloted, dashed horizontal grid, monospace
+   * axis labels and a baseline in slate. rows: [{label, short, a, b}]
+   */
+  function groupedBarChart(el, rows, colorA, colorB) {
+    if (!rows.length) { emptyChart(el, 'No saved dates in the selected range.'); return; }
+
+    var W = 1000, H = 300, padL = 60, padR = 20, padT = 52, padB = 50;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+
+    var max = 0;
+    rows.forEach(function (r) { max = Math.max(max, r.a, r.b); });
+    max = niceMax(max);
+    var axDec = max >= 4 ? 0 : 1;   // integers unless the scale is tiny
+
+    var slot = plotW / rows.length;
+    var barW = Math.max(4, Math.min(13, slot / 2.8));
+    var labelEvery = Math.ceil(rows.length / 10);
+
+    var svg = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H +
+      '" preserveAspectRatio="xMidYMid meet" role="img">' +
+      '<defs>' +
+        '<linearGradient id="rmasBarA" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#059669"/>' +
+        '</linearGradient>' +
+        '<linearGradient id="rmasBarB" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="#244570"/><stop offset="100%" stop-color="#132742"/>' +
+        '</linearGradient>' +
+      '</defs>';
+
+    for (var g = 0; g < 4; g++) {
+      var y = padT + (plotH / 4) * g;
+      var val = max - (max / 4) * g;
+      svg += '<line class="chart-grid-line" x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '"/>';
+      svg += '<text class="chart-axis-text" x="' + (padL - 10) + '" y="' + (y + 4) + '" text-anchor="end">' +
+        val.toFixed(axDec) + '</text>';
+    }
+    var base = padT + plotH;
+    svg += '<line class="chart-baseline" x1="' + padL + '" y1="' + base + '" x2="' + (W - padR) + '" y2="' + base + '"/>';
+    svg += '<text class="chart-axis-text" x="' + (padL - 10) + '" y="' + (base + 4) +
+      '" text-anchor="end">' + (0).toFixed(axDec) + '</text>';
+
+    rows.forEach(function (r, i) {
+      var cx = padL + slot * i + slot / 2;
+      var ha = max > 0 ? (r.a / max) * plotH : 0;
+      var hb = max > 0 ? (r.b / max) * plotH : 0;
+      svg += '<g class="bar-group">';
+      svg += '<title>' + esc(r.label) + ' \u2014 Acquired ' + fmt3(r.a) +
+             ' kg | Alloted ' + fmt3(r.b) + ' kg</title>';
+      if (ha > 0) {
+        svg += '<rect x="' + (cx - barW - 1).toFixed(1) + '" y="' + (base - ha).toFixed(1) +
+          '" width="' + barW + '" height="' + ha.toFixed(1) + '" rx="1.5" fill="url(#rmasBarA)"/>';
+      }
+      if (hb > 0) {
+        svg += '<rect x="' + (cx + 1).toFixed(1) + '" y="' + (base - hb).toFixed(1) +
+          '" width="' + barW + '" height="' + hb.toFixed(1) + '" rx="1.5" fill="url(#rmasBarB)"/>';
+      }
+      svg += '</g>';
+      /* Value above each bar. Rotated upright so the label only needs the
+         bar's width, which keeps it readable even at 20+ dates. */
+      if (ha > 0) {
+        var xa = cx - barW / 2 - 1, ya = base - ha - 5;
+        svg += '<text class="chart-bar-text" x="' + xa.toFixed(1) + '" y="' + ya.toFixed(1) +
+          '" text-anchor="start" transform="rotate(-90 ' + xa.toFixed(1) + ' ' + ya.toFixed(1) +
+          ')">' + fmt0(r.a) + '</text>';
+      }
+      if (hb > 0) {
+        var xb = cx + barW / 2 + 1, yb = base - hb - 5;
+        svg += '<text class="chart-bar-text" x="' + xb.toFixed(1) + '" y="' + yb.toFixed(1) +
+          '" text-anchor="start" transform="rotate(-90 ' + xb.toFixed(1) + ' ' + yb.toFixed(1) +
+          ')">' + fmt0(r.b) + '</text>';
+      }
+
+      if (i % labelEvery === 0) {
+        svg += '<text class="chart-tick-text" x="' + cx.toFixed(1) + '" y="' + (base + 22) +
+          '" text-anchor="middle">' + esc(r.short) + '</text>';
+      }
+    });
+
+    svg += '</svg>';
+    el.innerHTML = svg;
+  }
+
+  /**
+   * Single-series line chart with the reference amber area fill, hollow
+   * data nodes and a dark callout on the latest point.
+   * rows: [{label, short, value}]
+   */
+  function lineChart(el, rows, color) {
+    if (!rows.length) { emptyChart(el, 'No saved dates in the selected range.'); return; }
+
+    var W = 1000, H = 260, padL = 60, padR = 20, padT = 42, padB = 50;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+
+    var max = 0, min = 0;
+    rows.forEach(function (r) { max = Math.max(max, r.value); min = Math.min(min, r.value); });
+    max = niceMax(max);
+    if (min < 0) min = -niceMax(Math.abs(min)); else min = 0;
+    var span = (max - min) || 1;
+    var axDec = span >= 4 ? 0 : 1;  // integers unless the scale is tiny
+
+    function yFor(v) { return padT + plotH - ((v - min) / span) * plotH; }
+    var step = rows.length > 1 ? plotW / (rows.length - 1) : 0;
+    function xFor(i) { return rows.length > 1 ? padL + step * i : padL + plotW / 2; }
+    var labelEvery = Math.ceil(rows.length / 10);
+
+    var svg = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H +
+      '" preserveAspectRatio="xMidYMid meet" role="img">' +
+      '<defs><linearGradient id="rmasArea" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.32"/>' +
+        '<stop offset="70%" stop-color="' + color + '" stop-opacity="0.06"/>' +
+        '<stop offset="100%" stop-color="' + color + '" stop-opacity="0"/>' +
+      '</linearGradient></defs>';
+
+    for (var g = 0; g < 4; g++) {
+      var y = padT + (plotH / 4) * g;
+      var val = max - (span / 4) * g;
+      svg += '<line class="chart-grid-line" x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '"/>';
+      svg += '<text class="chart-axis-text" x="' + (padL - 10) + '" y="' + (y + 4) + '" text-anchor="end">' +
+        val.toFixed(axDec) + '</text>';
+    }
+    var zeroY = yFor(0);
+    svg += '<line class="chart-baseline" x1="' + padL + '" y1="' + zeroY.toFixed(1) +
+      '" x2="' + (W - padR) + '" y2="' + zeroY.toFixed(1) + '"/>';
+    svg += '<text class="chart-axis-text" x="' + (padL - 10) + '" y="' + (zeroY + 4).toFixed(1) +
+      '" text-anchor="end">' + (0).toFixed(axDec) + '</text>';
+
+    var pts = rows.map(function (r, i) {
+      return xFor(i).toFixed(1) + ',' + yFor(r.value).toFixed(1);
+    });
+
+    if (rows.length > 1) {
+      svg += '<polygon fill="url(#rmasArea)" points="' + xFor(0).toFixed(1) + ',' + zeroY.toFixed(1) + ' ' +
+        pts.join(' ') + ' ' + xFor(rows.length - 1).toFixed(1) + ',' + zeroY.toFixed(1) + '"/>';
+      svg += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color +
+        '" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+
+    rows.forEach(function (r, i) {
+      var cx = xFor(i), cy = yFor(r.value), last = (i === rows.length - 1);
+      svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (last ? 6 : 4.5) +
+        '" fill="' + (last ? color : '#ffffff') + '" stroke="' + (last ? '#ffffff' : color) +
+        '" stroke-width="' + (last ? 3 : 2.5) + '"><title>' +
+        esc(r.label) + ' \u2014 ' + fmt3(r.value) + ' kg</title></circle>';
+      /* Value above every node, so the trend can be read without hovering. */
+      svg += '<text class="chart-point-text" x="' + cx.toFixed(1) + '" y="' + (cy - 11).toFixed(1) +
+        '" text-anchor="middle">' + fmt0(r.value) + '</text>';
+
+      if (i % labelEvery === 0) {
+        svg += '<text class="chart-tick-text" x="' + cx.toFixed(1) + '" y="' + (padT + plotH + 22) +
+          '" text-anchor="middle">' + esc(r.short) + '</text>';
+      }
+    });
+
+    var lastRow = rows[rows.length - 1];
+    var lx = Math.min(xFor(rows.length - 1), W - padR - 58);
+    var ly = Math.max(yFor(lastRow.value) - 42, 4);
+    svg += '<g transform="translate(' + (lx - 52).toFixed(1) + ',' + ly.toFixed(1) + ')">' +
+      '<rect width="110" height="24" rx="5" fill="#0f172a"/>' +
+      '<polygon points="51,24 59,24 55,29" fill="#0f172a"/>' +
+      '<text class="chart-callout-text" x="55" y="16" text-anchor="middle">' +
+      fmt0(lastRow.value) + ' kg</text></g>';
+
+    svg += '</svg>';
+    el.innerHTML = svg;
+  }
+
+  /**
+   * Horizontal sector comparison sized to fit its half-width card without
+   * a horizontal scrollbar: a thin navy Required rail above a thicker amber
+   * Balance rail, each labelled with its own figure, and the row total on
+   * the right. rows: [{sector, required, balance}]
+   */
+  function sectorBarChart(el, rows) {
+    if (!rows.length) { emptyChart(el, 'No sector activity in the selected range.'); return; }
+
+    var top = rows.slice(0, 10);
+    var W = 560, rowH = 40, padL = 132, padR = 74, padT = 8;
+    var H = padT + top.length * rowH + 6;
+    var plotW = W - padL - padR;
+
+    var max = 0;
+    top.forEach(function (r) { max = Math.max(max, r.required, Math.max(0, r.balance)); });
+    max = niceMax(max);
+
+    var svg = '<svg class="chart-svg chart-svg--fit" viewBox="0 0 ' + W + ' ' + H +
+      '" preserveAspectRatio="xMidYMid meet" role="img">';
+
+    top.forEach(function (r, i) {
+      var y = padT + i * rowH;
+      var name = r.sector.length > 20 ? r.sector.substring(0, 19) + '\u2026' : r.sector;
+      svg += '<text class="chart-sector-text" x="' + (padL - 8) + '" y="' + (y + 22) +
+        '" text-anchor="end">' + esc(name) + '<title>' + esc(r.sector) + '</title></text>';
+
+      var wA = max > 0 ? (r.required / max) * plotW : 0;
+      var wB = max > 0 ? (Math.max(0, r.balance) / max) * plotW : 0;
+
+      /* Required rail */
+      svg += '<rect x="' + padL + '" y="' + (y + 6) + '" width="' + plotW + '" height="9" rx="3" fill="#f1f5f9"/>';
+      svg += '<rect x="' + padL + '" y="' + (y + 6) + '" width="' + Math.max(1, wA).toFixed(1) +
+        '" height="9" rx="3" fill="#1e3a5f"><title>' + esc(r.sector) +
+        ' \u2014 Required ' + fmt3(r.required) + ' kg</title></rect>';
+      svg += '<text class="chart-rail-text" x="' + (padL + Math.max(1, wA) + 5).toFixed(1) +
+        '" y="' + (y + 14) + '">' + fmt0(r.required) + '</text>';
+
+      /* Balance rail */
+      svg += '<rect x="' + padL + '" y="' + (y + 19) + '" width="' + plotW +
+        '" height="13" rx="3" fill="rgba(254,243,199,.6)"/>';
+      svg += '<rect x="' + padL + '" y="' + (y + 19) + '" width="' + Math.max(1, wB).toFixed(1) +
+        '" height="13" rx="3" fill="#f59e0b"><title>' + esc(r.sector) +
+        ' \u2014 Balance ' + fmt3(r.balance) + ' kg</title></rect>';
+      svg += '<text class="chart-rail-text" x="' + (padL + Math.max(1, wB) + 5).toFixed(1) +
+        '" y="' + (y + 29) + '">' + fmt0(r.balance) + '</text>';
+
+      /* Row total, kept clear of the rails on the right. */
+      svg += '<text class="chart-value-text" x="' + (W - 6) + '" y="' + (y + 22) +
+        '" text-anchor="end">' + fmt0(r.required + Math.max(0, r.balance)) + '</text>';
+    });
+
+    svg += '</svg>';
+    el.innerHTML = svg;
+  }
+
+  /**
+   * Writes the "versus previous cycle" line under a Total Acquired card.
+   * Green with an upward arrow when acquisition rose, rose with a downward
+   * arrow when it fell, and a neutral fallback when the range is too short
+   * for the comparison to mean anything.
+   */
+  function renderCycleDelta(node, cycle) {
+    if (!node) return;
+    var pct = cycle.changePercent;
+    if (pct === null || pct === undefined) {
+      node.textContent = 'kg acquired in range';
+      node.className = 'summary-stat__sub';
+      return;
+    }
+    var up = pct >= 0;
+    node.textContent = (up ? '\u2197 +' : '\u2198 ') + pct.toFixed(1) +
+      '% vs prev ' + cycle.dayCount + ' day(s)';
+    node.className = 'summary-stat__sub summary-stat__sub--' + (up ? 'up' : 'down');
+  }
+
+  /* ------------------ Metal Flow share chart ---------------------- */
+
+  /** One shade per party, drawn from the same blue ramp as the heatmap. */
+  var FLOW_COLORS = [
+    '#14345c', '#1f4e87', '#3a6fae', '#5c8fc9', '#7fadde',
+    '#a8caee', '#c2d9f2', '#8a5a08', '#b4740c', '#d19b3e'
+  ];
+  function flowColor(i) { return FLOW_COLORS[i % FLOW_COLORS.length]; }
+
+  /**
+   * Horizontal bar chart of total acquired per party, labelled with the
+   * weight and that party's share of everything acquired in range. Sized
+   * for the half-width card in Metal Flow History.
+   */
+  function sectorShareChart(el, series) {
+    if (!series || !series.sectors || !series.sectors.length) {
+      emptyChart(el, 'No acquired metal recorded in the selected range.');
+      return;
+    }
+
+    var rows = series.sectors;
+    var W = 560, rowH = 30, padL = 118, padR = 132, padT = 8;
+    var H = padT + rows.length * rowH + 8;
+    var plotW = W - padL - padR;
+    var max = niceMax(rows[0].total);
+
+    var svg = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H +
+      '" preserveAspectRatio="xMidYMid meet" role="img">';
+
+    rows.forEach(function (r, i) {
+      var y = padT + i * rowH;
+      var name = r.sector.length > 16 ? r.sector.substring(0, 15) + '\u2026' : r.sector;
+      var w = max > 0 ? (r.total / max) * plotW : 0;
+
+      svg += '<text class="chart-sector-text" x="' + (padL - 8) + '" y="' + (y + 19) +
+        '" text-anchor="end">' + esc(name) + '<title>' + esc(r.sector) + '</title></text>';
+      svg += '<rect x="' + padL + '" y="' + (y + 7) + '" width="' + Math.max(1, w).toFixed(1) +
+        '" height="14" fill="' + flowColor(i) + '" rx="3"><title>' + esc(r.sector) +
+        ' \u2014 ' + fmt3(r.total) + ' kg \u2014 ' + fmtPct(r.percent) + '</title></rect>';
+      svg += '<text class="chart-value-text" x="' + (W - 6) + '" y="' + (y + 19) +
+        '" text-anchor="end">' + fmt3(r.total) + ' \u00b7 ' + fmtPct(r.percent) + '</text>';
+    });
+
+    svg += '</svg>';
+    el.innerHTML = svg;
+  }
+
+  /* ------------------ Acquired metal heatmap ---------------------- */
+
+  /**
+   * Sequential colour scale for the heatmap. Colour encodes acquired weight
+   * only, never party identity, so the same shade always means the same
+   * quantity wherever it appears in the grid.
+   */
+  var HEAT_STOPS = [
+    { t: 0.00, c: [242, 244, 247] },   // grey  - nothing acquired
+    { t: 0.15, c: [234, 241, 251] },   // palest blue
+    { t: 0.45, c: [168, 202, 238] },   // light blue
+    { t: 0.75, c: [ 79, 139, 208] },   // mid blue
+    { t: 1.00, c: [ 20,  52,  92] }    // deep navy - highest
+  ];
+
+  function heatColor(t) {
+    if (!(t > 0)) return 'rgb(242,244,247)';
+    if (t > 1) t = 1;
+    for (var i = 1; i < HEAT_STOPS.length; i++) {
+      var hi = HEAT_STOPS[i], lo = HEAT_STOPS[i - 1];
+      if (t <= hi.t) {
+        var f = (t - lo.t) / (hi.t - lo.t);
+        var r = Math.round(lo.c[0] + (hi.c[0] - lo.c[0]) * f);
+        var g = Math.round(lo.c[1] + (hi.c[1] - lo.c[1]) * f);
+        var b = Math.round(lo.c[2] + (hi.c[2] - lo.c[2]) * f);
+        return 'rgb(' + r + ',' + g + ',' + b + ')';
+      }
+    }
+    return 'rgb(20,52,92)';
+  }
+
+  /** White text once the cell is dark enough for navy to fail contrast. */
+  function heatTextColor(t) { return t >= 0.6 ? '#ffffff' : '#14345c'; }
+
+  /**
+   * Draws the Date x Party acquired-metal heatmap as inline SVG.
+   *
+   * `prefix` selects which card to draw into: 'db' for the Analysis Dashboard
+   * card, 'mf' for the Metal Flow History card. Both cards use the same id
+   * suffixes, so one renderer serves both.
+   *
+   * Re-rendering replaces the container's markup outright, so no previous
+   * drawing instance is ever left behind and repeated filtering cannot stack
+   * up duplicate canvases.
+   */
+  function renderFlowHeatmap(prefix, hm) {
+    function el(suffix) { return $(prefix + suffix); }
+    var host = el('Heatmap');
+    var scroll = el('HeatScroll');
+    var desc = el('HeatDesc');
+    if (!host) return;
+
+    hm = hm || { dates: [], sectors: [], cells: [], maximumAcquired: 0 };
+
+    /* The Metal Flow card shows these figures in the page summary strip
+       instead of inside the chart, so each node is optional here. */
+    function put(suffix, text) { var n = el(suffix); if (n) n.textContent = text; }
+
+    put('HeatTotal', fmt3(hm.totalAcquired || 0));
+    put('HeatDates', hm.dateCount || 0);
+    put('HeatParties', hm.partyCount || 0);
+
+    var peak = hm.peak || {};
+    put('HeatPeak', fmt3(peak.acquired || 0));
+    put('HeatPeakSub', peak.sector ? (peak.sector + ' \u00b7 ' + peak.fullDateLabel) : '\u2014');
+
+    var top = hm.mostActive || {};
+    put('HeatTop', top.sector || '\u2014');
+    put('HeatTopSub', top.sector
+      ? (fmt3(top.total) + ' kg \u00b7 ' + fmtPct(top.percent)) : '\u2014');
+
+    el('HeatChip').textContent = (hm.dateCount || 0) + ' date(s) \u00d7 ' +
+      (hm.partyCount || 0) + ' part' + ((hm.partyCount === 1) ? 'y' : 'ies');
+    put('HeatLegendMax', fmt3(hm.maximumAcquired || 0) + ' kg');
+
+    if (!hm.dates.length || !hm.sectors.length) {
+      host.innerHTML = '<div class="empty-state">' +
+        '<div class="empty-state__title">No acquired metal in this range</div>' +
+        '<div class="empty-state__text">Widen the date range or clear the sector filter, ' +
+        'then apply again.</div></div>';
+      if (desc) desc.textContent = 'The heatmap is empty because no Metal Flow records matched the filters.';
+      return;
+    }
+
+    /* ---- geometry ---- */
+    var nCols = hm.dates.length, nRows = hm.sectors.length;
+    var padL = 148, padR = 16, padT = 48, padB = 14;
+    var rowH = 30, gap = 2;
+    // Cells never shrink below a legible width. Once the grid outgrows the
+    // card it scrolls sideways inside .heat-scroll rather than compressing,
+    // so a long date filter stays readable instead of turning into slivers.
+    var cellW = nCols <= 8 ? 92 : (nCols <= 16 ? 74 : (nCols <= 30 ? 62 : 56));
+
+    // Each cell costs a rect, a title and a text node. Past roughly ninety
+    // columns that is several thousand nodes, which is what makes a long
+    // range feel sluggish to scroll. Beyond the threshold the printed
+    // values are dropped and the tooltip carries the exact figure instead.
+    var TEXT_LIMIT = 90;
+    var showCellText = cellW >= 56 && nCols <= TEXT_LIMIT;
+    var labelEvery = nCols <= 60 ? 1 : 2;
+
+    var W = padL + nCols * cellW + padR;
+    var H = padT + nRows * rowH + padB;
+
+    /* ---- index the cells by date and party ---- */
+    var value = {};
+    hm.cells.forEach(function (c) { value[c.dateKey + '\u0000' + c.sector] = c.acquired; });
+    var max = hm.maximumAcquired > 0 ? hm.maximumAcquired : 1;
+
+    var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H +
+      '" xmlns="http://www.w3.org/2000/svg" role="img" shape-rendering="crispEdges" ' +
+      'aria-label="Acquired kilograms for each Metal Flow party on each allocation date">';
+
+    /* ---- column headings, angled so long dates do not collide ---- */
+    hm.dates.forEach(function (d, ci) {
+      if (ci % labelEvery !== 0) return;
+      var x = padL + ci * cellW + cellW / 2;
+      svg += '<text class="heat-col-label" x="' + x.toFixed(1) + '" y="' + (padT - 10) +
+        '" text-anchor="start" transform="rotate(-45 ' + x.toFixed(1) + ' ' + (padT - 10) + ')">' +
+        esc(d.dateLabel) + '</text>';
+    });
+
+    /* ---- rows ---- */
+    hm.sectors.forEach(function (sector, ri) {
+      var y = padT + ri * rowH;
+      var name = sector.length > 20 ? sector.substring(0, 19) + '\u2026' : sector;
+
+      svg += '<text class="heat-row-label" x="' + (padL - 10) + '" y="' + (y + rowH / 2 + 4) +
+        '" text-anchor="end">' + esc(name) + '<title>' + esc(sector) + '</title></text>';
+
+      hm.dates.forEach(function (d, ci) {
+        var v = value[d.dateKey + '\u0000' + sector];
+        if (v === undefined) v = 0;                 // no row for this party that day
+        var t = max > 0 ? v / max : 0;
+        var x = padL + ci * cellW;
+
+        svg += '<rect x="' + (x + gap / 2) + '" y="' + (y + gap / 2) +
+          '" width="' + (cellW - gap) + '" height="' + (rowH - gap) +
+          '" rx="3" fill="' + heatColor(t) + '" stroke="#ffffff" stroke-width="1">' +
+          '<title>Date: ' + esc(d.fullDateLabel) +
+          '\nParty: ' + esc(sector) +
+          '\nToday\u2019s Acquired: ' + fmt3(v) + ' kg</title></rect>';
+
+        if (showCellText) {
+          svg += '<text class="heat-cell-text" x="' + (x + cellW / 2) + '" y="' +
+            (y + rowH / 2 + 3.5) + '" text-anchor="middle" fill="' + heatTextColor(t) +
+            '" pointer-events="none">' + fmt3(v) + '</text>';
+        }
+      });
+    });
+
+    svg += '</svg>';
+    host.innerHTML = svg;
+
+    if (scroll) {
+      scroll.scrollLeft = scroll.scrollWidth;       // newest dates first on screen
+    }
+
+    /* ---- text alternative, so nothing is carried by colour alone ---- */
+    if (desc) {
+      var parts = hm.sectors.map(function (sector) {
+        var total = 0;
+        hm.dates.forEach(function (d) {
+          total += (value[d.dateKey + '\u0000' + sector] || 0);
+        });
+        return sector + ' acquired ' + fmt3(total) + ' kg';
+      });
+      desc.textContent = 'Heatmap of ' + hm.dateCount + ' allocation dates by ' +
+        hm.partyCount + ' Metal Flow parties. ' + parts.join('. ') +
+        '. Each cell shows the kilograms acquired by that party on that date, ' +
+        'printed inside the cell and repeated in its tooltip.';
+    }
+
+    var note = el('HeatNote');
+    if (note) {
+      var windowed = hm.windowDays && hm.dateCount >= hm.windowDays;
+      var text = hm.truncationNote ||
+        (windowed ? ('This grid is limited to the last ' + hm.windowDays +
+                     ' days of the selected range.') : '');
+      note.textContent = text;
+      note.classList.toggle('hidden', !text);
+    }
+  }
+
+  /* --------------------------- Dashboard -------------------------- */
+
+  function dashboardFilters() {
+    updateFilterCount('dbFilterCount', ['dbFrom', 'dbTo'], ['dbSector']);
+    var sector = $('dbSector').value;
+    return {
+      fromDate: $('dbFrom').value,
+      toDate: $('dbTo').value,
+      sectors: sector === 'all' ? null : [sector]
+    };
+  }
+
+  function loadDashboard() {
+    if (R.busy) return;
+    R.busy = true;
+    showOverlay('Preparing the analysis\u2026');
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        R.busy = false;
+        hideOverlay();
+        if (!res || !res.ok) {
+          toast('error', (res && res.message) || 'The dashboard could not be loaded.');
+          return;
+        }
+        R.loadedOnce.dashboard = true;
+        renderDashboard(res.data);
+      })
+      .withFailureHandler(function (err) {
+        R.busy = false;
+        hideOverlay();
+        toast('error', 'The dashboard could not be loaded. Check the connection and retry.');
+        console.error(err);
+      })
+      .getDashboardSummary(dashboardFilters());
+  }
+
+  function renderDashboard(data) {
+    var k = data.kpis;
+
+    $('dbStatDays').textContent = k.dayCount;
+    $('dbStatLatest').textContent = k.latestDateDisplay || 'no data';
+    $('dbStatAcquired').textContent = fmt3(k.totalAcquired);
+    $('dbStatAlloted').textContent = fmt3(k.totalAlloted);
+    $('dbStatFulfil').textContent = fmtPct(k.fulfilmentRate || 0);
+
+    renderCycleDelta($('dbStatAcquiredDelta'),
+      { changePercent: k.acquiredChangePercent, dayCount: k.cycleDayCount });
+
+    $('dbStatClosing').textContent = fmt3(k.latestClosingBalance);
+    $('dbStatPeak').textContent = 'Trajectory peak: ' + fmt3(k.peakClosingBalance) + ' kg' +
+      (k.peakClosingDate ? ' on ' + k.peakClosingDate : '');
+    $('dbStatUtilisation').textContent = fmtPct(k.utilisation);
+    $('dbStatAvg').textContent = fmt3(k.averageDailyAcquired);
+
+    $('dbChart1Chip').textContent = k.dayCount + ' day(s)';
+    $('dbChart2Chip').textContent = k.latestDateDisplay
+      ? ('Latest ' + fmt3(k.latestClosingBalance) + ' kg') : '\u2014';
+
+    groupedBarChart($('dbChartAcquiredAlloted'), data.byDate.map(function (d) {
+      return { label: d.dateDisplay, short: shortDate(d.dateKey), a: d.acquired, b: d.alloted };
+    }), '#10b981', '#1e3a5f');
+
+    lineChart($('dbChartBalance'), data.byDate.map(function (d) {
+      return { label: d.dateDisplay, short: shortDate(d.dateKey), value: d.balance };
+    }), '#d97706');
+
+    sectorBarChart($('dbChartSector'), data.bySector);
+
+    // Operators see their Metal Flow history here rather than as a separate tab.
+    var flowCard = $('dbFlowTrendCard');
+    if (flowCard) {
+      var showFlowTrend = (R.isAdmin === false);
+      flowCard.classList.toggle('hidden', !showFlowTrend);
+      if (showFlowTrend) {
+        var flowPoints = data.byDate.map(function (d) {
+          return { label: d.dateDisplay, short: shortDate(d.dateKey), value: d.acquired };
+        });
+        lineChart($('dbChartFlowTrend'), flowPoints, '#10b981');
+        var totalAcq = 0;
+        flowPoints.forEach(function (p) { totalAcq += p.value; });
+        $('dbFlowTrendChip').textContent = fmt3(totalAcq) + ' kg over ' + flowPoints.length + ' day(s)';
+      }
+    }
+
+    // Top pending sectors
+    var pendingHtml = data.topPending.map(function (r, i) {
+      return '<tr>' +
+        '<td data-label="Rank">' + (i + 1) + '</td>' +
+        '<td class="date-cell" data-label="Sector">' + esc(r.sector) + '</td>' +
+        '<td class="num" data-label="Pending Balance">' + fmt3(r.pending) + '</td>' +
+        '<td data-label="As Of">' + esc(r.asOf) + '</td>' +
+      '</tr>';
+    }).join('');
+    var footSectors = $('dbFootSectors');
+    if (footSectors) {
+      footSectors.textContent = data.bySector.length + ' sector(s) active';
+      $('dbFootAcquired').textContent = fmt3(k.totalAcquired) + ' kg';
+      $('dbFootSynced').textContent = 'Last synced ' +
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    $('dbPendingBody').innerHTML = pendingHtml;
+    $('dbPendingEmpty').classList.toggle('hidden', data.topPending.length > 0);
+    $('dbPendingTable').classList.toggle('hidden', data.topPending.length === 0);
+  }
+
+  /* ---------------------------- CSV export ------------------------ */
+
+  function csvCell(v) {
+    var s = String(v === null || v === undefined ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function buildCsv(headers, rows) {
+    var lines = [headers.map(csvCell).join(',')];
+    rows.forEach(function (r) { lines.push(r.map(csvCell).join(',')); });
+    return lines.join('\n');
+  }
+
+  function offerCsv(filename, csv) {
+    if (!csv) { toast('warn', 'There is nothing to export.'); return; }
+
+    // Try a direct download first; the HtmlService sandbox blocks it in some
+    // browsers, so a copyable fallback is always available.
+    var downloaded = false;
+    try {
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      downloaded = true;
+    } catch (e) {
+      downloaded = false;
+    }
+
+    $('exportText').value = csv;
+    $('exportBody').textContent = downloaded
+      ? 'The download was started. If your browser blocked it, copy the CSV below instead.'
+      : 'Copy the CSV below and paste it into a spreadsheet or text file.';
+    $('exportModal').classList.remove('hidden');
+    if (downloaded) toast('success', 'CSV export prepared.');
+  }
+
+  function exportAllocationHistory() {
+    var rows = R.lastRows.allocationHistory || [];
+    if (!rows.length) { toast('warn', 'Load some history before exporting.'); return; }
+    var csv = buildCsv(
+      ['Date', 'Sector', 'Purity', 'Previous Requirement', "Today's Required Weight", 'Alloted', 'Balance'],
+      rows.map(function (r) {
+        return [r.dateDisplay, r.sector, r.purity,
+          fmt3(r.previousRequirement), fmt3(r.todayRequired), fmt3(r.alloted), fmt3(r.balance)];
+      })
+    );
+    offerCsv('allocation-history.csv', csv);
+  }
+
+  /**
+   * Exports what the charts show: one row per date with a column per sector,
+   * followed by the per-sector totals and their share. This covers every
+   * matched record, where the old row export only covered the visible page.
+   */
+  function exportFlowHistory() {
+    var series = R.flowSeries;
+    if (!series || !series.dates.length || !series.sectors.length) {
+      toast('warn', 'Load some history before exporting.');
+      return;
+    }
+
+    var names = series.sectors.map(function (x) { return x.sector; });
+    var body = series.dates.map(function (dk, i) {
+      return [series.displays[i]].concat(series.sectors.map(function (x) {
+        return fmt3(x.values[i]);
+      }));
+    });
+
+    body.push([]);
+    body.push(['Total (kg)'].concat(series.sectors.map(function (x) { return fmt3(x.total); })));
+    body.push(['Share (%)'].concat(series.sectors.map(function (x) { return fmtPct(x.percent); })));
+
+    offerCsv('metal-flow-history.csv', buildCsv(['Date'].concat(names), body));
+  }
+
+  /* ------------------------------ events -------------------------- */
+
+  function resetFilters(prefix, then) {
+    var o = R.options || {};
+    var from7 = o.maxDate ? shiftIso(o.maxDate, -6) : (o.suggestedFrom || '');
+    if (o.minDate && from7 && from7 < o.minDate) from7 = o.minDate;
+    if ($(prefix + 'From')) $(prefix + 'From').value = from7;
+    if ($(prefix + 'To')) $(prefix + 'To').value = o.maxDate || o.suggestedTo || '';
+    ['Sector', 'Purity', 'Status'].forEach(function (f) {
+      var el = $(prefix + f);
+      if (el) el.value = 'all';
+    });
+    var search = $(prefix + 'Search');
+    if (search) search.value = '';
+
+    var group = $(prefix + 'QuickRange');
+    if (group) {
+      var btns = group.querySelectorAll('.quick-range__btn');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('is-active', btns[i].getAttribute('data-days') === '7');
+      }
+    }
+    then();
+  }
+
+  /**
+   * Operators own a single Metal Flow sector, so a whole history tab for it is
+   * more navigation than it is worth. Their acquired trend is shown as a line
+   * chart on the dashboard instead, and the tab is hidden.
+   */
+  function applyRoleToTabs() {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        R.isAdmin = !!(res && res.ok && res.data && res.data.isAdmin);
+        var tab = document.querySelector('.nav-tab[data-view="flowHistory"]');
+        if (tab) tab.classList.toggle('hidden', !R.isAdmin);
+      })
+      .withFailureHandler(function () { R.isAdmin = true; })
+      .getCurrentUserAccess();
+  }
+
+  function bind() {
+    var tabs = document.querySelectorAll('.nav-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function () {
+        switchView(this.getAttribute('data-view'));
+      });
+    }
+
+    $('ahApply').addEventListener('click', function () {
+      R.offset.allocationHistory = 0;
+      loadAllocationHistory();
+    });
+    $('ahReset').addEventListener('click', function () {
+      R.offset.allocationHistory = 0;
+      resetFilters('ah', loadAllocationHistory);
+    });
+
+    $('mfApply').addEventListener('click', function () {
+      R.offset.flowHistory = 0;
+      loadFlowHistory();
+    });
+    $('mfReset').addEventListener('click', function () {
+      R.offset.flowHistory = 0;
+      resetFilters('mf', loadFlowHistory);
+    });
+
+    $('dbApply').addEventListener('click', loadDashboard);
+    var printBtn = $('dbPrint');
+    if (printBtn) printBtn.addEventListener('click', function () { window.print(); });
+    $('dbReset').addEventListener('click', function () { resetFilters('db', loadDashboard); });
+
+    [['ahQuickRange', 'ah', loadAllocationHistory],
+     ['mfQuickRange', 'mf', loadFlowHistory],
+     ['dbQuickRange', 'db', loadDashboard]].forEach(function (cfg) {
+      $(cfg[0]).addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.quick-range__btn') : null;
+        if (!btn) return;
+        applyQuickRange(cfg[1], btn.getAttribute('data-days'), btn);
+        if (cfg[1] === 'ah') R.offset.allocationHistory = 0;
+        if (cfg[1] === 'mf') R.offset.flowHistory = 0;
+        cfg[2]();
+      });
+    });
+
+    $('exportClose').addEventListener('click', function () { $('exportModal').classList.add('hidden'); });
+    $('exportModal').addEventListener('click', function (e) {
+      if (e.target === this) this.classList.add('hidden');
+    });
+    $('exportCopy').addEventListener('click', function () {
+      var ta = $('exportText');
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      var done = false;
+      try { done = document.execCommand('copy'); } catch (e) { done = false; }
+      if (!done && navigator.clipboard) {
+        navigator.clipboard.writeText(ta.value).then(function () { toast('success', 'CSV copied to the clipboard.'); },
+          function () { toast('warn', 'Select the text and copy it manually.'); });
+      } else {
+        toast(done ? 'success' : 'warn', done ? 'CSV copied to the clipboard.' : 'Select the text and copy it manually.');
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !$('exportModal').classList.contains('hidden')) {
+        $('exportModal').classList.add('hidden');
+      }
+    });
+
+    applyRoleToTabs();
+  }
+
+  document.addEventListener('DOMContentLoaded', bind);
+})();
+</script>

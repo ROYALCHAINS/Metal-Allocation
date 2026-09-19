@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Royal Metal Allocation System</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
+
+  <!-- Style load order is load-bearing: tokens -> reports -> audit. -->
+  <link rel="stylesheet" href="src/styles/tokens.css">
+  <link rel="stylesheet" href="src/styles/reports.css">
+  <link rel="stylesheet" href="src/styles/audit.css">
+
+  <!-- Google Identity Services, for sign-in (see src/api/auth.js). -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    // Set these before main.js runs. In a real deployment these are injected
+    // by the build/deploy step rather than hand-edited here.
+    window.RMAS_API_BASE = window.RMAS_API_BASE || '/api';
+    window.RMAS_GOOGLE_CLIENT_ID = window.RMAS_GOOGLE_CLIENT_ID || '';
+  </script>
+</head>
+<body>
+
+  <!-- ============================ APP HEADER ============================ -->
+  <header class="app-header" role="banner">
+    <div class="app-header__inner">
+      <div class="brand">
+        <img class="brand__logo" alt="Royal Chain logo"
+               src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEcAAABYCAMAAACQ7hpjAAAAYFBMVEXbslPr3ditYRrn0Z3MoZjKkiavaFrBfAbkw3KTMR27g3a+gCB+BwC/jYGPJBD+/f2JGQTPlhGYOii7dQbWpjPjyIzHiAvRq6QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA5mgU6AAAAGHRSTlP////////////////////////////////gEcFnAAAELUlEQVR42q2ZbZujKgyGDSJq5xyK1tL//0838QVDACuzyzWfZtt7nzwhITBNszTN0j6fTwD90f8/DC41z6O1dpy/Lavwe8N7GN5NN03LRJywAJfWGnHW0bLl5ebns22GBn8W5HQRhxN1Y2ZbRjFOh2sqcHaaNmMBFTgUF4IuORsqq4o4MAwD6bmIK0bNKWnVg3JWPdOXuMJCUjaugzPd5DzhISQFzrD6429y8EuxJJ4vfzuuVZJyOT0Ncda4gDbyo9G4qXEf3gTxuHaO/s+FZe1sjNbwFbRyuobH9YkDX3HK5FhwenToWZoCJ9Cs0Sko5ZAeX+RsrLmRorSr5xDJPgTJuEy+vnHo8zaODnL++OkrB7+hIkkPd3KWjdPf4qCkTyroyPuup7vBwS/pRNCmZ6mIS4KAxYVri8u/b3Ei0Joyrufl/V2OdafZHyd8ruLMEAXG4/IVHOtMFNivOSyyh5M+V3EML7Ldn6XWH1rADOJ6kPOq4LhHifPyfQ1HHYFhO9vqYlmmes4ZmNo5U+BU+RM2tYr0/CDnVcUxeT19LUcJDtrcEafvqzh2hNjnLV8vWlWc3eiQ9y0uwqgqjmvD6cM4qlrPnrBQFzSw/AXHnHo64qjquPSRroSTOd+/cc4+hnPzzknj0qoMcp9wNgufZVz4P4Jx13qU4HQpZ9v5ZRCEmePIl9/1CH8gnirEWnu9CZw35X2hOhV6QkFr60p1ys7lndO9+phD/3a0vNEVGqJxCUfmKzp9M2mjsgAX6/HEUSIuyI6CUdtQnOPXuiAO18NOumzOSG481015js7MgfHJDNHcu/vzEnUxQjK9yc2sonmV4kJ/RL3zsHJRmejXQU+HnJ7rcc1lVDglanEvOPIV70Nmj3I5c7S8p7w3n39EXUBZjlQTcWT/gZI7TngT5X0hTs/ims8tKK8HOt3erN67SM9ZXOCi+4paW1L2frpxXqpnek7OYQRdoGa8P4GxLnvv3usi7j8nZ5/81xvdR5s527GjvoGrTf3ZHZ2VUrN1F+8J7+Az54R8mTOu63cSxuF9A8pFcc0p7Of7HB/8+Recn9jnUO/6Fxzuz9F/fsVp034Id86nzvJMcW1897nNnBf6Jqf1Z97bzPkFN+Ni81jMUfczz/SQz332fIdqnwXn9haaQ/9ZOXIOd59bkblZxXp6Of8cezFzvEdn2cg4PtVzRpYdXMKHUC6bo/rMnHle+oqKnAHpc+aeEsq+NG+iZOMu+mr6BJGb7ug96LgXHHXRb3pkks+BAcQbLXZaA+ccHji9Jz3JZmEvR4Bj+fqA57ZTCGiTOrEP93tc5jjnj1mg6bV9Vka3LJF8riM97/zmxbM4/xZ5eMbi8hccuwch3w+NS/uPp7jaYjHR0R6/+rXsgOY+e7+9A9jiHxfsiK7QXxFgfWBnHxwV+Uz3lD/TRVKi2rROvAAAAABJRU5ErkJggg==">
+        <div class="brand__text">
+          <div class="brand__title">Metal Allocation System</div>
+        </div>
+      </div>
+      <div class="header-meta">
+        <div class="header-meta__item">
+          <span class="header-meta__label">Selected Date</span>
+          <span class="header-meta__value" id="hdrSelectedDate">&mdash;</span>
+        </div>
+        <div class="header-meta__item">
+          <span class="header-meta__label">Previous Source Date</span>
+          <span class="header-meta__value" id="hdrPrevDate">&mdash;</span>
+        </div>
+        <div class="header-meta__item">
+          <span class="header-meta__label">Date Status</span>
+          <span class="status-pill status-pill--neutral" id="hdrStatus">Loading</span>
+        </div>
+        <div class="header-meta__item header-meta__item--user">
+          <span class="header-meta__value" id="hdrUser">&mdash;</span>
+          <span class="role-pill role-pill--checking" id="hdrRole">Checking</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================ VIEW TABS ============================ -->
+  <nav class="view-nav" role="tablist" aria-label="Application views">
+    <div class="view-nav__inner">
+      <button type="button" class="nav-tab is-active" data-view="daily" role="tab" aria-selected="true">
+        Daily Allocation
+      </button>
+      <button type="button" class="nav-tab" data-view="allocationHistory" role="tab" aria-selected="false">
+        Allocation History<span class="nav-tab__count hidden" id="tabCountAlloc">0</span>
+      </button>
+      <button type="button" class="nav-tab" data-view="flowHistory" role="tab" aria-selected="false">
+        Metal Flow History<span class="nav-tab__count hidden" id="tabCountFlow">0</span>
+      </button>
+      <button type="button" class="nav-tab" data-view="dashboard" role="tab" aria-selected="false">
+        Analysis Dashboard
+      </button>
+      <button type="button" class="nav-tab hidden" data-view="audit" id="tabAudit" role="tab" aria-selected="false">
+        Audit Log<span class="nav-tab__count hidden" id="tabCountAudit">0</span>
+      </button>
+    </div>
+  </nav>
+
+  <main class="page" role="main">
+
+    <!-- ================================================================= -->
+    <!-- VIEW 1 — DAILY ALLOCATION                                          -->
+    <!-- ================================================================= -->
+    <section class="view is-active" id="view-daily" role="tabpanel" aria-label="Daily Allocation">
+
+      <div class="card control-bar" aria-label="Allocation date selection">
+        <div class="control-bar__field">
+          <label class="field-label" for="allocationDate">Allocation Date</label>
+          <input type="date" id="allocationDate" class="input input--date" autocomplete="off">
+        </div>
+        <div class="control-bar__field">
+          <span class="field-label">Previous Source Date</span>
+          <div class="readonly-box" id="prevSourceDateBox">&mdash;</div>
+        </div>
+        <div class="control-bar__field control-bar__field--grow">
+          <span class="field-label">Date Status</span>
+          <div class="readonly-box" id="dateStatusBox">Select a date to begin.</div>
+        </div>
+        <div class="control-bar__actions">
+          <button type="button" class="btn btn--ghost" id="btnReloadDate">Refresh</button>
+          <button type="button" class="btn btn--gold hidden" id="btnAdminRevise">Edit Saved Date</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid" aria-label="Daily totals">
+        <div class="kpi">
+          <div class="stat-head">
+            <span class="kpi__label">Previous Requirement</span>
+            <span class="stat-dot stat-dot--slate" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="kpi__value" id="kpiPrevRequirement">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="stat-sub">carried forward</div>
+        </div>
+
+        <div class="kpi">
+          <div class="stat-head">
+            <span class="kpi__label">Today&rsquo;s Required</span>
+            <span class="stat-dot stat-dot--slate" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="kpi__value" id="kpiTodayRequired">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="stat-sub">new indents today</div>
+        </div>
+
+        <div class="kpi">
+          <div class="stat-head">
+            <span class="kpi__label">Today&rsquo;s Acquired</span>
+            <span class="stat-dot stat-dot--emerald" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="kpi__value" id="kpiAcquired">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="stat-sub" id="kpiAcquiredSub">&mdash;</div>
+        </div>
+
+        <div class="kpi">
+          <div class="stat-head">
+            <span class="kpi__label">Actual Alloted</span>
+            <span class="stat-dot stat-dot--navy" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="kpi__value" id="kpiAlloted">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="stat-sub"><strong id="kpiAllotedFulfil">0.0%</strong> fulfilment rate</div>
+        </div>
+
+        <div class="kpi kpi--primary" id="kpiRemainingCard">
+          <div class="stat-head">
+            <span class="kpi__label">Remaining to Allocate</span>
+            <span class="stat-dot stat-dot--emerald" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="kpi__value" id="kpiRemaining">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="stat-sub" id="kpiRemainingNote">available to allocate</div>
+        </div>
+
+        <div class="kpi kpi--closing">
+          <div class="stat-head">
+            <span class="kpi__label">Closing Balance</span>
+            <span class="stat-badge">Latest</span>
+          </div>
+          <div class="stat-figure">
+            <span class="kpi__value" id="kpiClosingBalance">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="stat-sub" id="kpiClosingSub">&mdash;</div>
+        </div>
+      </div>
+
+
+      <div class="banner hidden" id="banner" role="status" aria-live="polite">
+        <span class="banner__icon" id="bannerIcon">i</span>
+        <span class="banner__text" id="bannerText"></span>
+      </div>
+
+      <div class="layout">
+        <section class="card panel panel--allocation" aria-label="Sector allocation">
+          <div class="panel__head">
+            <h2 class="panel__title">Sector Allocation</h2>
+            <div class="panel__tools">
+              <span class="chip" id="allocRowCount">19 sectors</span>
+              <button type="button" class="btn btn--tiny only-mobile" id="btnToggleCards">Collapse all</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table alloc-table" id="allocTable">
+              <thead>
+                <tr>
+                  <th class="col-sector">Sector</th>
+                  <th class="col-purity">Purity</th>
+                  <th class="num">Previous Requirement</th>
+                  <th class="num">Today&rsquo;s Required</th>
+                  <th class="num">Alloted</th>
+                  <th class="num">Balance</th>
+                </tr>
+              </thead>
+              <tbody id="allocBody"></tbody>
+              <tfoot>
+                <tr class="totals-row">
+                  <td colspan="2" class="totals-row__label">Totals</td>
+                  <td class="num" data-label="Previous Requirement" id="totPrevRequirement">0.000</td>
+                  <td class="num" data-label="Today&rsquo;s Required" id="totTodayRequired">0.000</td>
+                  <td class="num" data-label="Alloted" id="totAlloted">0.000</td>
+                  <td class="num" data-label="Balance" id="totBalance">0.000</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
+
+        <section class="card panel panel--flow" aria-label="Metal Flow acquisition">
+          <div class="panel__head">
+            <h2 class="panel__title">Metal Flow</h2>
+            <span class="chip" id="flowRowCount">8 sectors</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table flow-table" id="flowTable">
+              <thead>
+                <tr>
+                  <th class="col-sector">Sector</th>
+                  <th class="num">Previous Acquired</th>
+                  <th class="num">Today&rsquo;s Acquired</th>
+                </tr>
+              </thead>
+              <tbody id="flowBody"></tbody>
+              <tfoot>
+                <tr class="totals-row">
+                  <td class="totals-row__label">Totals</td>
+                  <td class="num" data-label="Previous Acquired" id="totPrevAcquired">0.000</td>
+                  <td class="num" data-label="Today&rsquo;s Acquired" id="totAcquired">0.000</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="flow-summary">
+            <div class="flow-summary__row">
+              <span>Total Today&rsquo;s Acquired</span>
+              <strong id="flowSummaryAcquired">0.000 kg</strong>
+            </div>
+            <div class="flow-summary__row">
+              <span>Actual Total Alloted</span>
+              <strong id="flowSummaryAlloted">0.000 kg</strong>
+            </div>
+            <div class="flow-summary__row flow-summary__row--strong" id="flowSummaryRemainingRow">
+              <span>Remaining to Allocate</span>
+              <strong id="flowSummaryRemaining">0.000 kg</strong>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- VIEW 2 — ALLOCATION HISTORY                                       -->
+    <!-- ================================================================= -->
+    <section class="view" id="view-allocationHistory" role="tabpanel" aria-label="Allocation History">
+
+      <div class="card filter-bar">
+        <div class="filter-bar__head">
+          <div class="filter-bar__title">
+            <svg class="filter-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                    stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+            </svg>
+            <span class="filter-bar__heading">Filter &amp; Query Controls</span>
+            <span class="filter-bar__dot" aria-hidden="true">&middot;</span>
+            <span class="filter-bar__hint">Refine ledger records across dates, sectors and balance status</span>
+          </div>
+          <div class="filter-bar__applied">Applied: <strong id="ahFilterCount">&mdash;</strong></div>
+        </div>
+
+        <div class="filter-bar__grid">
+          <div class="filter-group filter-group--dates">
+            <div class="filter-field">
+              <label class="field-label" for="ahFrom">From Date</label>
+              <input type="date" id="ahFrom" class="input input--date">
+            </div>
+            <span class="filter-arrow" aria-hidden="true">&rarr;</span>
+            <div class="filter-field">
+              <label class="field-label" for="ahTo">To Date</label>
+              <input type="date" id="ahTo" class="input input--date">
+            </div>
+          </div>
+
+          <div class="filter-field filter-field--range">
+            <span class="field-label">Quick Range</span>
+            <div class="quick-range" id="ahQuickRange">
+              <button type="button" class="quick-range__btn is-active" data-days="7">7 d</button>
+              <button type="button" class="quick-range__btn" data-days="30">30 d</button>
+            </div>
+          </div>
+
+          <div class="filter-group filter-group--selects">
+            <div class="filter-field">
+              <label class="field-label" for="ahSector">Sector</label>
+              <select id="ahSector" class="select"><option value="all">All sectors</option></select>
+            </div>
+            <div class="filter-field">
+              <label class="field-label" for="ahStatus">Balance Status</label>
+              <select id="ahStatus" class="select">
+                <option value="all">All records</option>
+                <option value="pending">Pending balance only</option>
+                <option value="cleared">Fully cleared only</option>
+                <option value="allocated">Alloted &gt; 0</option>
+                <option value="unallocated">Alloted = 0</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-actions">
+            <button type="button" class="btn btn--ghost" id="ahReset">Reset</button>
+            <button type="button" class="btn btn--primary" id="ahApply">
+              <span class="btn__tick" aria-hidden="true">&#10003;</span>Apply Filters
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div class="summary-stat summary-stat--navy">
+          <div class="summary-stat__label">Records</div>
+          <div class="summary-stat__value" id="ahStatRecords">0</div>
+          <div class="summary-stat__sub" id="ahStatDates">0 dates</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Previous Requirement</div>
+          <div class="summary-stat__value" id="ahStatPrev">0.000</div>
+          <div class="summary-stat__sub">kg</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Today&rsquo;s Required</div>
+          <div class="summary-stat__value" id="ahStatRequired">0.000</div>
+          <div class="summary-stat__sub">kg</div>
+        </div>
+        <div class="summary-stat summary-stat--green">
+          <div class="stat-head">
+            <span class="summary-stat__label">Total Alloted</span>
+            <span class="stat-dot stat-dot--navy" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="summary-stat__value" id="ahStatAlloted">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="summary-stat__sub"><strong id="ahStatFulfil">0.0%</strong> fulfilment rate</div>
+        </div>
+        <div class="summary-stat summary-stat--closing">
+          <div class="stat-head">
+            <span class="summary-stat__label">Total Balance</span>
+            <span class="stat-badge">Latest</span>
+          </div>
+          <div class="stat-figure">
+            <span class="summary-stat__value" id="ahStatBalance">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="summary-stat__sub" id="ahStatPeak">Trajectory peak: &mdash;</div>
+        </div>
+      </div>
+
+      <div class="card panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Allocation History</h2>
+          <span class="chip" id="ahRowChip">0 rows</span>
+        </div>
+        <div class="history-scroll">
+          <table class="history-table" id="ahTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Sector</th>
+                <th>Purity</th>
+                <th class="num">Prev. Requirement</th>
+                <th class="num">Today&rsquo;s Required</th>
+                <th class="num">Alloted</th>
+                <th class="num">Balance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="ahBody"></tbody>
+          </table>
+          <div class="empty-state hidden" id="ahEmpty">
+            <div class="empty-state__title">No records found</div>
+            <div class="empty-state__text">Adjust the date range or filters and apply again.</div>
+          </div>
+        </div>
+        <div class="truncation-note hidden" id="ahTruncated"></div>
+        <div class="pager" id="ahPager">
+          <button type="button" class="pager__btn" id="ahPrev" disabled>&larr; Previous</button>
+          <span class="pager__info" id="ahPageInfo">&mdash;</span>
+          <button type="button" class="pager__btn" id="ahNext" disabled>Next &rarr;</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- VIEW 3 — METAL FLOW HISTORY                                       -->
+    <!-- ================================================================= -->
+    <section class="view" id="view-flowHistory" role="tabpanel" aria-label="Metal Flow History">
+
+      <div class="card filter-bar">
+        <div class="filter-bar__head">
+          <div class="filter-bar__title">
+            <svg class="filter-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                    stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+            </svg>
+            <span class="filter-bar__heading">Filter &amp; Query Controls</span>
+            <span class="filter-bar__dot" aria-hidden="true">&middot;</span>
+            <span class="filter-bar__hint">Refine Metal Flow records across dates and parties</span>
+          </div>
+          <div class="filter-bar__applied">Applied: <strong id="mfFilterCount">&mdash;</strong></div>
+        </div>
+
+        <div class="filter-bar__grid">
+          <div class="filter-group filter-group--dates">
+            <div class="filter-field">
+              <label class="field-label" for="mfFrom">From Date</label>
+              <input type="date" id="mfFrom" class="input input--date">
+            </div>
+            <span class="filter-arrow" aria-hidden="true">&rarr;</span>
+            <div class="filter-field">
+              <label class="field-label" for="mfTo">To Date</label>
+              <input type="date" id="mfTo" class="input input--date">
+            </div>
+          </div>
+
+          <div class="filter-field filter-field--range">
+            <span class="field-label">Quick Range</span>
+            <div class="quick-range" id="mfQuickRange">
+              <button type="button" class="quick-range__btn is-active" data-days="7">7 d</button>
+              <button type="button" class="quick-range__btn" data-days="30">30 d</button>
+            </div>
+          </div>
+
+          <div class="filter-group filter-group--selects">
+            <div class="filter-field">
+              <label class="field-label" for="mfSector">Metal Flow Sector</label>
+              <select id="mfSector" class="select"><option value="all">All sectors</option></select>
+            </div>
+          </div>
+
+          <div class="filter-actions">
+            <button type="button" class="btn btn--ghost" id="mfReset">Reset</button>
+            <button type="button" class="btn btn--primary" id="mfApply">
+              <span class="btn__tick" aria-hidden="true">&#10003;</span>Apply Filters
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div class="summary-stat summary-stat--navy">
+          <div class="summary-stat__label">Records</div>
+          <div class="summary-stat__value" id="mfStatRecords">0</div>
+          <div class="summary-stat__sub" id="mfStatDates">0 dates</div>
+        </div>
+        <div class="summary-stat summary-stat--green">
+          <div class="stat-head">
+            <span class="summary-stat__label">Total Acquired</span>
+            <span class="stat-dot stat-dot--emerald" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="summary-stat__value" id="mfStatTotal">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="summary-stat__sub" id="mfStatTotalSub">&mdash;</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Highest Single Day</div>
+          <div class="summary-stat__value" id="mfHeatPeak">0.000</div>
+          <div class="summary-stat__sub" id="mfHeatPeakSub">&mdash;</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Most Active Party</div>
+          <div class="summary-stat__value summary-stat__value--text" id="mfHeatTop">&mdash;</div>
+          <div class="summary-stat__sub" id="mfHeatTopSub">&mdash;</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Average per Day</div>
+          <div class="summary-stat__value" id="mfStatAvg">0.000</div>
+          <div class="summary-stat__sub">kg</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Sectors Covered</div>
+          <div class="summary-stat__value" id="mfStatSectors">0</div>
+          <div class="summary-stat__sub">of 8</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card chart-card--full" id="mfHeatmapCard">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Daily Acquired Metal by Party</h3>
+            <span class="chip" id="mfHeatChip">&mdash;</span>
+          </div>
+          <p class="chart-card__subtitle">
+            Daily acquired kilograms by Metal Flow party, for the last 30 days of the selected
+            range. Darker cells indicate higher acquisition.
+          </p>
+
+          <div class="chart-card__body">
+            <div class="heat-scroll" id="mfHeatScroll" tabindex="0" role="group"
+                 aria-label="Daily acquired metal by party heatmap"
+                 aria-describedby="mfHeatDesc">
+              <div id="mfHeatmap"></div>
+            </div>
+            <p class="visually-hidden" id="mfHeatDesc"></p>
+          </div>
+
+          <div class="chart-legend heat-legend" id="mfHeatLegend">
+            <span class="heat-legend__caption">Acquired (kg)</span>
+            <span class="heat-legend__scale" aria-hidden="true"></span>
+            <span class="heat-legend__ticks">
+              <span>0 kg</span><span>Low</span><span>Medium</span><span id="mfHeatLegendMax">Highest</span>
+            </span>
+          </div>
+          <p class="heat-note hidden" id="mfHeatNote"></p>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Total Acquired by Sector</h3>
+            <span class="chip" id="mfShareChip">0.000 kg total</span>
+            <span class="chip" id="mfRowChip">0 records</span>
+          </div>
+          <div class="chart-card__body" id="mfShareChart"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- VIEW 4 — ANALYSIS DASHBOARD                                       -->
+    <!-- ================================================================= -->
+    <section class="view" id="view-dashboard" role="tabpanel" aria-label="Analysis Dashboard">
+
+      <div class="card filter-bar">
+        <div class="filter-bar__head">
+          <div class="filter-bar__title">
+            <svg class="filter-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                    stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+            </svg>
+            <span class="filter-bar__heading">Filter &amp; Query Controls</span>
+            <span class="filter-bar__dot" aria-hidden="true">&middot;</span>
+            <span class="filter-bar__hint">Refine the analysis horizon across dates and sectors</span>
+          </div>
+          <div class="filter-bar__applied">Applied: <strong id="dbFilterCount">&mdash;</strong></div>
+        </div>
+
+        <div class="filter-bar__grid">
+          <div class="filter-group filter-group--dates">
+            <div class="filter-field">
+              <label class="field-label" for="dbFrom">From Date</label>
+              <input type="date" id="dbFrom" class="input input--date">
+            </div>
+            <span class="filter-arrow" aria-hidden="true">&rarr;</span>
+            <div class="filter-field">
+              <label class="field-label" for="dbTo">To Date</label>
+              <input type="date" id="dbTo" class="input input--date">
+            </div>
+          </div>
+
+          <div class="filter-field filter-field--range">
+            <span class="field-label">Quick Range</span>
+            <div class="quick-range" id="dbQuickRange">
+              <button type="button" class="quick-range__btn is-active" data-days="7">7 d</button>
+              <button type="button" class="quick-range__btn" data-days="30">30 d</button>
+            </div>
+          </div>
+
+          <div class="filter-group filter-group--selects">
+            <div class="filter-field">
+              <label class="field-label" for="dbSector">Sector</label>
+              <select id="dbSector" class="select"><option value="all">All sectors</option></select>
+            </div>
+          </div>
+
+          <div class="filter-actions">
+            <button type="button" class="btn btn--ghost" id="dbReset">Reset</button>
+            <button type="button" class="btn btn--primary" id="dbApply">
+              <span class="btn__tick" aria-hidden="true">&#10003;</span>Apply Filters
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div class="summary-stat summary-stat--navy">
+          <div class="summary-stat__label">Saved Days</div>
+          <div class="summary-stat__value" id="dbStatDays">0</div>
+          <div class="summary-stat__sub" id="dbStatLatest">&mdash;</div>
+        </div>
+        <div class="summary-stat summary-stat--green">
+          <div class="stat-head">
+            <span class="summary-stat__label">Total Acquired</span>
+            <span class="stat-dot stat-dot--emerald" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="summary-stat__value" id="dbStatAcquired">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="summary-stat__sub" id="dbStatAcquiredDelta">&mdash;</div>
+        </div>
+        <div class="summary-stat">
+          <div class="stat-head">
+            <span class="summary-stat__label">Total Alloted</span>
+            <span class="stat-dot stat-dot--navy" aria-hidden="true"></span>
+          </div>
+          <div class="stat-figure">
+            <span class="summary-stat__value" id="dbStatAlloted">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="summary-stat__sub"><strong id="dbStatFulfil">0.0%</strong> fulfilment rate</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Utilisation</div>
+          <div class="summary-stat__value" id="dbStatUtilisation">0.0%</div>
+          <div class="summary-stat__sub">alloted vs acquired</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-stat__label">Avg Daily Acquired</div>
+          <div class="summary-stat__value" id="dbStatAvg">0.000</div>
+          <div class="summary-stat__sub">kg per saved day</div>
+        </div>
+        <div class="summary-stat summary-stat--closing">
+          <div class="stat-head">
+            <span class="summary-stat__label">Closing Balance</span>
+            <span class="stat-badge">Latest</span>
+          </div>
+          <div class="stat-figure">
+            <span class="summary-stat__value" id="dbStatClosing">0.000</span>
+            <span class="stat-unit">kg</span>
+          </div>
+          <div class="summary-stat__sub" id="dbStatPeak">Trajectory peak: &mdash;</div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="chart-card chart-card--full">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Acquired vs Alloted by Date</h3>
+            <span class="chip" id="dbChart1Chip">&mdash;</span>
+          </div>
+          <p class="chart-card__subtitle">Comparative inflow versus fulfilment volume over the selected horizon.</p>
+          <div class="chart-card__body" id="dbChartAcquiredAlloted"></div>
+          <div class="chart-legend">
+            <span class="legend-key"><span class="legend-swatch" style="background:#10b981"></span>Acquired</span>
+            <span class="legend-key"><span class="legend-swatch" style="background:#1e3a5f"></span>Alloted</span>
+          </div>
+        </div>
+
+        <div class="chart-card chart-card--full">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Closing Balance Trend</h3>
+            <span class="chip chip--amber" id="dbChart2Chip">&mdash;</span>
+          </div>
+          <p class="chart-card__subtitle">Cumulative physical vault stock position, measured in kilograms.</p>
+          <div class="chart-card__body" id="dbChartBalance"></div>
+          <div class="chart-legend">
+            <span class="legend-key"><span class="legend-swatch" style="background:#d97706"></span>Closing Balance (kg)</span>
+          </div>
+        </div>
+
+        <div class="chart-card chart-card--full hidden" id="dbFlowTrendCard">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Your Metal Flow Trend</h3>
+            <span class="chip" id="dbFlowTrendChip">&mdash;</span>
+          </div>
+          <div class="chart-card__body" id="dbChartFlowTrend"></div>
+          <div class="chart-legend">
+            <span class="legend-key"><span class="legend-swatch" style="background:#10b981"></span>Today&rsquo;s Acquired (kg)</span>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Requirement vs Balance by Sector</h3>
+          </div>
+          <p class="chart-card__subtitle">Comparative outstanding balance against demand volume.</p>
+          <div class="chart-card__body" id="dbChartSector"></div>
+          <div class="chart-legend">
+            <span class="legend-key"><span class="legend-swatch" style="background:#1e3a5f"></span>Required</span>
+            <span class="legend-key"><span class="legend-swatch" style="background:#f59e0b"></span>Balance</span>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-card__head">
+            <h3 class="chart-card__title">Top Sectors by Pending Balance</h3>
+            <span class="chip">Latest saved date per sector</span>
+          </div>
+          <p class="chart-card__subtitle">Live operational ledger ranking, based on the recorded pending requirement.</p>
+          <div class="history-scroll">
+            <table class="history-table" id="dbPendingTable">
+              <thead>
+                <tr>
+                  <th class="col-rank">#</th>
+                  <th class="col-sector-name">Sector</th>
+                  <th class="num col-pending">Pending Balance</th>
+                  <th class="col-asof">As Of</th>
+                </tr>
+              </thead>
+              <tbody id="dbPendingBody"></tbody>
+            </table>
+            <div class="empty-state hidden" id="dbPendingEmpty">
+              <div class="empty-state__title">No pending balance</div>
+              <div class="empty-state__text">Every sector is fully cleared for the selected range.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dash-footer">
+        <div class="dash-footer__status">
+          <span class="dash-footer__dot" aria-hidden="true"></span>
+          <span class="dash-footer__label">Analytics synchronised</span>
+          <span class="dash-footer__sep">|</span>
+          <span class="dash-footer__meta" id="dbFootSectors">&mdash;</span>
+          <span class="dash-footer__sep">|</span>
+          <span class="dash-footer__meta" id="dbFootSynced">&mdash;</span>
+        </div>
+        <div class="dash-footer__actions">
+          <span class="dash-footer__badge">
+            <span class="dash-footer__badge-label">Total acquired</span>
+            <span id="dbFootAcquired">0.000 kg</span>
+          </span>
+          <button type="button" class="btn btn--ghost btn--tiny" id="dbPrint">Print executive briefing</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- VIEW 5 — AUDIT LOG (administrators only)                          -->
+    <!-- ================================================================= -->
+    <section class="view" id="view-audit" role="tabpanel" aria-label="Audit Log">
+
+      <div class="card hidden" id="auditGate">
+        <div class="access-gate">
+          <div class="access-gate__icon" aria-hidden="true">!</div>
+          <div class="access-gate__title">Administrator access required</div>
+          <div class="access-gate__text" id="auditGateText">
+            The audit log contains user identities and full data snapshots, so it is
+            restricted to authorized administrators. Contact your administrator if you
+            need access to this record.
+          </div>
+        </div>
+      </div>
+
+      <div id="auditContent">
+        <div class="card filter-bar">
+          <div class="filter-bar__head">
+            <div class="filter-bar__title">
+              <svg class="filter-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                      stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+              </svg>
+              <span class="filter-bar__heading">Filter &amp; Query Controls</span>
+              <span class="filter-bar__dot" aria-hidden="true">&middot;</span>
+              <span class="filter-bar__hint">Refine audit entries across dates, actions, status and users</span>
+            </div>
+            <div class="filter-bar__applied">Applied: <strong id="auFilterCount">&mdash;</strong></div>
+          </div>
+
+          <div class="filter-bar__grid filter-bar__grid--audit">
+            <div class="filter-group filter-group--dates">
+              <div class="filter-field">
+                <label class="field-label" for="auFrom">Allocation Date From</label>
+                <input type="date" id="auFrom" class="input input--date">
+              </div>
+              <span class="filter-arrow" aria-hidden="true">&rarr;</span>
+              <div class="filter-field">
+                <label class="field-label" for="auTo">Allocation Date To</label>
+                <input type="date" id="auTo" class="input input--date">
+              </div>
+            </div>
+
+            <div class="filter-group filter-group--selects filter-group--selects-3">
+              <div class="filter-field">
+                <label class="field-label" for="auAction">Action Type</label>
+                <select id="auAction" class="select"><option value="all">All actions</option></select>
+              </div>
+              <div class="filter-field">
+                <label class="field-label" for="auStatus">Status</label>
+                <select id="auStatus" class="select"><option value="all">All statuses</option></select>
+              </div>
+              <div class="filter-field">
+                <label class="field-label" for="auUser">User</label>
+                <select id="auUser" class="select"><option value="all">All users</option></select>
+              </div>
+            </div>
+
+            <div class="filter-actions">
+              <button type="button" class="btn btn--ghost" id="auReset">Reset</button>
+              <button type="button" class="btn btn--primary" id="auApply">
+                <span class="btn__tick" aria-hidden="true">&#10003;</span>Apply Filters
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="summary-strip">
+          <div class="summary-stat summary-stat--navy">
+            <div class="summary-stat__label">Entries</div>
+            <div class="summary-stat__value" id="auStatTotal">0</div>
+            <div class="summary-stat__sub">matching the filters</div>
+          </div>
+          <div class="summary-stat summary-stat--green">
+            <div class="summary-stat__label">Successful</div>
+            <div class="summary-stat__value" id="auStatSuccess">0</div>
+            <div class="summary-stat__sub">saves and revisions</div>
+          </div>
+          <div class="summary-stat summary-stat--amber">
+            <div class="summary-stat__label">Blocked</div>
+            <div class="summary-stat__value" id="auStatBlocked">0</div>
+            <div class="summary-stat__sub">duplicates and refusals</div>
+          </div>
+          <div class="summary-stat">
+            <div class="summary-stat__label">Failed</div>
+            <div class="summary-stat__value" id="auStatFailed">0</div>
+            <div class="summary-stat__sub">errors and rollbacks</div>
+          </div>
+          <div class="summary-stat">
+            <div class="summary-stat__label">Revisions</div>
+            <div class="summary-stat__value" id="auStatRevisions">0</div>
+            <div class="summary-stat__sub">administrator edits</div>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="panel__head">
+            <h2 class="panel__title">Audit Log</h2>
+            <span class="chip" id="auRowChip">0 entries</span>
+          </div>
+          <div class="history-scroll">
+            <table class="history-table" id="auTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Allocation Date</th>
+                  <th>Action</th>
+                  <th>Rev.</th>
+                  <th>User</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Audit ID</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody id="auBody"></tbody>
+            </table>
+            <div class="empty-state hidden" id="auEmpty">
+              <div class="empty-state__title">No audit entries found</div>
+              <div class="empty-state__text">Adjust the date range or filters and apply again.</div>
+            </div>
+          </div>
+          <div class="truncation-note hidden" id="auTruncated"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="page-spacer" aria-hidden="true"></div>
+  </main>
+
+  <!-- ========================== ACTION BAR ============================= -->
+  <div class="action-bar" id="actionBar">
+    <div class="action-bar__info">
+      <div class="action-bar__remaining" id="barRemainingWrap">
+        <span class="action-bar__label">Remaining to Allocate</span>
+        <span class="action-bar__value" id="barRemaining">0.000 kg</span>
+      </div>
+      <div class="action-bar__status" id="barStatus">Select a date to begin.</div>
+    </div>
+    <div class="action-bar__buttons">
+      <button type="button" class="btn btn--ghost" id="btnReset">Reset Unsaved Changes</button>
+      <button type="button" class="btn btn--primary" id="btnSave" disabled>Save Current Data</button>
+    </div>
+  </div>
+
+  <!-- ========================= LOADING OVERLAY ========================= -->
+  <div class="overlay hidden" id="overlay" role="alert" aria-live="assertive">
+    <div class="overlay__box">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="overlay__text" id="overlayText">Loading&hellip;</div>
+    </div>
+  </div>
+
+  <!-- ======================= CONFIRM / REVISE MODAL ==================== -->
+  <div class="modal hidden" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal__box">
+      <h3 class="modal__title" id="modalTitle">Confirm</h3>
+      <div class="modal__body" id="modalBody"></div>
+      <div class="modal__field hidden" id="modalReasonWrap">
+        <label class="field-label" for="modalReason">Revision Reason (mandatory)</label>
+        <textarea id="modalReason" class="input input--textarea" rows="3"
+                  placeholder="Explain why this saved date is being revised"></textarea>
+        <div class="inline-error hidden" id="modalReasonError"></div>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="modalCancel">Cancel</button>
+        <button type="button" class="btn btn--primary" id="modalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================== EXPORT MODAL =========================== -->
+  <div class="modal hidden" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+    <div class="modal__box">
+      <h3 class="modal__title" id="exportTitle">Export CSV</h3>
+      <div class="modal__body" id="exportBody">
+        Copy the CSV below and paste it into a spreadsheet or text file.
+      </div>
+      <div class="modal__field">
+        <textarea id="exportText" class="input input--textarea" rows="10" readonly></textarea>
+      </div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="exportClose">Close</button>
+        <button type="button" class="btn btn--primary" id="exportCopy">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= AUDIT DETAIL MODAL ======================== -->
+  <div class="modal hidden" id="auditModal" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+    <div class="modal__box modal__box--wide">
+      <h3 class="modal__title" id="auditModalTitle">Audit Entry</h3>
+      <div id="auditModalBody"></div>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" id="auditModalClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ TOASTS ============================== -->
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

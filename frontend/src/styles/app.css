@@ -132,3 +132,9 @@
 .heat-col-label { font-size: 11.5px; font-weight: 500; }
 .heat-row-label { font-size: 13px; font-weight: 500; }
 .heat-scroll > .chart-svg { width: auto; max-width: none; }
+
+/* The `hidden` attribute must win over a component's own display. .btn sets
+   display:inline-flex, which otherwise beats the user-agent [hidden] rule and
+   leaves a "hidden" button visible — the Daily Allocation screen shows Save to
+   administrators and Submit to operators using exactly that attribute. */
+[hidden] { display: none !important; }

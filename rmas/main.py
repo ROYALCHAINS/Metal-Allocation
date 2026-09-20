@@ -22,6 +22,7 @@ from routers.audit import router as audit_router
 from routers.auth import router as auth_router
 from routers.reports import router as reports_router
 from routers.sectors import router as sectors_router
+from routers.staging import router as staging_router
 from schemas.common import HealthResponse
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(sectors_router)
     app.include_router(allocations_router)
+    app.include_router(staging_router)
     app.include_router(reports_router)
     app.include_router(audit_router)
 

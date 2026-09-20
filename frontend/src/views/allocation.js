@@ -15,7 +15,12 @@
  * kilograms with JS floats.
  */
 
-import { getAllocationForDate, newRequestId, saveAllocation } from '../api/allocations.js';
+import {
+  getAllocationForDate,
+  newRequestId,
+  saveAllocation,
+  submitRequirements,
+} from '../api/allocations.js';
 import { escapeHtml } from '../components/appHeader.js';
 import { balanceClass, fmt3, formatGrams, toGrams } from '../lib/format.js';
 
@@ -140,8 +145,11 @@ export function renderAllocationView(container, user) {
         </div>
       </div>
       <div class="action-bar__buttons">
-        <button type="button" class="btn btn--primary" id="btnSave" ${isAdmin ? '' : 'disabled'}>
-          ${isAdmin ? 'Save Current Data' : 'Administrator only'}
+        <button type="button" class="btn btn--primary" id="btnSave" ${isAdmin ? '' : 'hidden'}>
+          Save Current Data
+        </button>
+        <button type="button" class="btn btn--primary" id="btnSubmit" ${isAdmin ? 'hidden' : ''}>
+          Submit Requirement
         </button>
       </div>
     </div>
@@ -157,7 +165,10 @@ export function renderAllocationView(container, user) {
 
   function renderRows() {
     const lockAlloted = !isAdmin || model.is_saved;
-    const lockRequired = model.is_saved;
+    // A submission cannot be changed once sent, so the operator's own inputs
+    // lock the moment their party has submitted. The server decides this —
+    // already_submitted is resolved from the staging table, not the browser.
+    const lockRequired = model.is_saved || model.already_submitted;
 
     $('allocBody').innerHTML = model.allocations.length
       ? model.allocations
@@ -321,6 +332,10 @@ export function renderAllocationView(container, user) {
         );
       }
       $('btnSave').disabled = !isAdmin || model.is_saved;
+      $('btnSubmit').disabled = !model.can_submit;
+      $('btnSubmit').textContent = model.already_submitted
+        ? 'Requirement submitted'
+        : 'Submit Requirement';
       renderRows();
     } catch (err) {
       $('dateStatusBox').textContent = 'Could not load this date.';
@@ -350,7 +365,40 @@ export function renderAllocationView(container, user) {
       banner('error', err.message);
       button.disabled = false;
     } finally {
-      button.textContent = isAdmin ? 'Save Current Data' : 'Administrator only';
+      button.textContent = 'Save Current Data';
+    }
+  });
+
+  $('btnSubmit').addEventListener('click', async () => {
+    const button = $('btnSubmit');
+    button.disabled = true;
+    button.textContent = 'Submitting…';
+    try {
+      const payload = collect();
+      // Only the two figures an operator owns. Alloted is the administrator's
+      // decision and is never sent from here.
+      const result = await submitRequirements(selectedDate, {
+        allocations: payload.allocations.map((row) => ({
+          sector_id: row.sector_id,
+          today_required_kg: row.today_required_kg,
+        })),
+        metal_flow: payload.metalFlow.map((row) => ({
+          flow_sector_id: row.flow_sector_id,
+          today_acquired_kg: row.today_acquired_kg,
+        })),
+        request_id: newRequestId(),
+      });
+      banner(
+        'success',
+        `Submitted ${result.allocation_records} sector and ${result.flow_records} Metal Flow ` +
+          `figures — ${result.total_required_kg} kg required, ${result.total_acquired_kg} kg ` +
+          'acquired. This cannot be changed; contact the administrator if a correction is needed.'
+      );
+      await load(selectedDate);
+    } catch (err) {
+      banner('error', err.message);
+      button.disabled = false;
+      button.textContent = 'Submit Requirement';
     }
   });
 

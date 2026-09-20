@@ -40,3 +40,28 @@ export async function saveAllocation(isoDate, { allocations, metalFlow, requestI
 export function newRequestId() {
   return `REQ-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
+
+/**
+ * Submit this party's requirement for a date — the operator's path.
+ *
+ * One shot: the server refuses a second submission for the same party and
+ * date, so the caller must lock its inputs on success rather than assume a
+ * retry is available.
+ */
+export async function submitRequirements(allocationDate, payload) {
+  const response = await fetch(`/staging/${allocationDate}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const detail = body && body.detail;
+    throw new Error(
+      (detail && detail.message) ||
+        (typeof detail === 'string' ? detail : null) ||
+        `Submission failed (${response.status})`
+    );
+  }
+  return response.json();
+}

@@ -22,6 +22,9 @@ class AllocationRowResponse(BaseModel):
     today_required_kg: Decimal
     alloted_kg: Decimal
     balance_kg: Decimal
+    # True when this figure came from an operator submission rather than the
+    # saved ledger, so the screen can mark it as somebody else's input.
+    from_submission: bool = False
 
 
 class FlowRowResponse(BaseModel):
@@ -30,6 +33,7 @@ class FlowRowResponse(BaseModel):
     party_name: str
     previous_acquired_kg: Decimal
     today_acquired_kg: Decimal
+    from_submission: bool = False
 
 
 class TotalsResponse(BaseModel):
@@ -92,3 +96,8 @@ class AllocationModelResponse(BaseModel):
     metal_flow: list[FlowRowResponse]
     totals: TotalsResponse
     total_previous_acquired_kg: Decimal
+    # An operator whose party has submitted sees their figures, locked.
+    already_submitted: bool = False
+    # How many fields on this screen came from an operator submission.
+    staged_value_count: int = 0
+    can_submit: bool = False

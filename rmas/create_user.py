@@ -38,6 +38,35 @@ from services.password_service import hash_password
 from services.validation_service import normalize_key
 
 
+def _read_password() -> str:
+    """Prompt for the password twice, or read it from stdin when piped.
+
+    Still never an argv value — a password on the command line lands in the
+    process list and in shell history, which is why this script has always
+    asked for it separately.
+
+    The stdin branch exists because getpass reads the console device directly
+    (msvcrt on Windows, /dev/tty elsewhere) and cannot see a pipe, so a
+    non-interactive caller would hang forever waiting for input it has no way
+    to supply. Piping one line is enough; a second line, if present, is treated
+    as the confirmation.
+    """
+    if sys.stdin.isatty():
+        password = getpass.getpass("Password: ")
+        confirm = getpass.getpass("Confirm password: ")
+    else:
+        password = sys.stdin.readline().rstrip("\r\n")
+        confirm = sys.stdin.readline().rstrip("\r\n") or password
+
+    if not password:
+        print("Password cannot be empty.", file=sys.stderr)
+        raise SystemExit(1)
+    if password != confirm:
+        print("Passwords do not match.", file=sys.stderr)
+        raise SystemExit(1)
+    return password
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create or update an RMAS user account.")
     parser.add_argument("--email", required=True)
@@ -53,14 +82,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    password = getpass.getpass("Password: ")
-    confirm = getpass.getpass("Confirm password: ")
-    if not password:
-        print("Password cannot be empty.", file=sys.stderr)
-        raise SystemExit(1)
-    if password != confirm:
-        print("Passwords do not match.", file=sys.stderr)
-        raise SystemExit(1)
+    password = _read_password()
 
     db = SessionLocal()
     try:

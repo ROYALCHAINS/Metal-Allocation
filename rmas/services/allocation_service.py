@@ -22,6 +22,7 @@ All weights are integer grams (schema.sql). Nothing here touches float.
 """
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date
 
@@ -30,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from models.allocation import MetalMaster
 from models.flow import MetalFlowMaster
-from repository import allocation_repo, flow_repo, idempotency_repo
+from repository import allocation_repo, flow_repo, idempotency_repo, staging_repo
 from repository.sector_repo import get_allocation_sectors, get_flow_sectors
 from rules.business_rules import business_rules
 from services import audit_service
@@ -51,6 +52,9 @@ from services.validation_service import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class AllocationRow:
     sector_id: int
@@ -62,6 +66,9 @@ class AllocationRow:
     today_required_g: int
     alloted_g: int
     balance_g: int
+    # True when this figure came from an operator submission rather than the
+    # saved ledger, so the screen can mark it as somebody else's input.
+    from_submission: bool = False
 
 
 @dataclass
@@ -71,6 +78,7 @@ class FlowRow:
     party_name: str
     previous_acquired_g: int
     today_acquired_g: int
+    from_submission: bool = False
 
 
 @dataclass
@@ -91,6 +99,10 @@ class AllocationModel:
     metal_flow: list[FlowRow]
     totals: Totals
     total_previous_acquired_g: int
+    # Filled in by staging_service.apply_staging_to_model(), not here — the
+    # allocation service must not depend on the staging service.
+    already_submitted: bool = False
+    staged_value_count: int = 0
 
 
 def _resolve_source_date(
@@ -342,6 +354,16 @@ def save_daily_allocation(
                 for row in normalized.metal_flow
             ],
         )
+
+        # 4b. Operator submissions for this date stop being pending. Ports
+        # markStagingConsumed_(): date-wide, not per party, and the rows are
+        # marked rather than deleted so the record of what was submitted
+        # survives. Never allowed to fail the save — a bookkeeping problem must
+        # not reverse a committed ledger.
+        try:
+            staging_repo.mark_consumed(db, date_iso)
+        except Exception:  # noqa: BLE001 — deliberately swallowed, as in legacy
+            logger.exception("staging consume failed for %s", date_iso)
 
         # 5. Audit the successful save.
         audit_id = audit_service.write_entry(

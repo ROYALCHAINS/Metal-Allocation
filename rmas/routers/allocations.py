@@ -28,6 +28,8 @@ from schemas.allocation import (
     SaveAllocationResponse,
     TotalsResponse,
 )
+from services.scope_service import is_administrator
+from services.staging_service import apply_staging_to_model
 from services.allocation_service import (
     AllocationModel,
     build_allocation_model,
@@ -96,6 +98,7 @@ def _to_response(model: AllocationModel) -> AllocationModelResponse:
                 today_required_kg=grams_to_kg(row.today_required_g),
                 alloted_kg=grams_to_kg(row.alloted_g),
                 balance_kg=grams_to_kg(row.balance_g),
+                from_submission=row.from_submission,
             )
             for row in model.allocations
         ],
@@ -106,6 +109,7 @@ def _to_response(model: AllocationModel) -> AllocationModelResponse:
                 party_name=row.party_name,
                 previous_acquired_kg=grams_to_kg(row.previous_acquired_g),
                 today_acquired_kg=grams_to_kg(row.today_acquired_g),
+                from_submission=row.from_submission,
             )
             for row in model.metal_flow
         ],
@@ -129,11 +133,29 @@ def get_allocation_for_date(
     user: AppUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AllocationModelResponse:
+    scope = _resolve_scope(db, user)
     try:
-        model = build_allocation_model(db, allocation_date, _resolve_scope(db, user))
+        model = build_allocation_model(db, allocation_date, scope)
+        # Operator submissions overlay the model here, which is how an
+        # operator's figures reach the administrator's screen. Applied after
+        # the model is built and scoped, exactly as legacy orders it.
+        state = apply_staging_to_model(db, model, scope, allocation_date)
     except RmasError as exc:
         raise _http_error(exc) from exc
-    return _to_response(model)
+
+    model.already_submitted = state.already_submitted
+    model.staged_value_count = state.staged_value_count
+
+    response = _to_response(model)
+    # An operator may submit while the date is neither saved nor already
+    # submitted by their party. Decided on the server; the browser is told,
+    # never asked.
+    response.already_submitted = state.already_submitted
+    response.staged_value_count = state.staged_value_count
+    response.can_submit = (
+        not is_administrator(user) and not model.is_saved and not state.already_submitted
+    )
+    return response
 
 
 @router.post("/{allocation_date}", response_model=SaveAllocationResponse)

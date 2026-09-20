@@ -1,150 +1,98 @@
 """
-scope_service.py
+services/scope_service.py
 Royal Metal Allocation System — Python port
 
-Ports StagingService.gs's scope-resolution half (getUserScope_,
-scopeAllows_, scopeAllowsFlow_, filterRowsByScope_, filterFlowRowsByScope_,
-buildSectorPartyMaps_, rowPartyKey_, scopedSectorNames_). The submission
-workflow itself lives in services/staging_service.py.
+Ports the identity/authorization portion of AuditService.gs's isAdministrator_()
+— deliberately relocated out of the audit service, since admin-check logic being
+load-bearing for authorization has nothing to do with auditing (see
+sessions/2026-09-19_rmas-legacy-review/session.md, per-file summary §1) — plus
+the scope resolution from StagingService.gs's getUserScope_() / scopeAllows_() /
+scopeAllowsFlow_().
 
-CLAUDE.md 6.8: scope is enforced server-side on every request, without
-exception. A party/sector filter from the client is never authoritative —
-routers must intersect it with what this module resolves, never take it as-is.
+Scope is resolved server-side on every request and is never accepted from the
+client (CLAUDE.md section 6, rule 8).
 """
 
-from dataclasses import dataclass, field
-from decimal import Decimal
+from dataclasses import dataclass
 
-from sqlalchemy.orm import Session
-
-from rmas.models.party import Party
-from rmas.models.sector import AllocationSector, FlowSector
-from rmas.models.user import User, UserRole
-from rmas.repository import sector_repo
-from rmas.services.dto import AllocationModel
+from models.user import AppUser
 
 
 @dataclass(frozen=True)
 class UserScope:
+    """What a user may see. Mirrors legacy's getUserScope_() return shape.
+
+    `flow_sector_ids` of None means "no explicit grants — fall back to party",
+    exactly like legacy's flowSectorKeys: null. An empty list would mean
+    something different and is deliberately not produced here.
+    """
+
+    user_id: int
     email: str
-    display_name: str
     is_admin: bool
-    role: str  # "ADMIN" | "OPERATOR"
-    parties: list[Party]
-    party_keys: frozenset[str]
-    # None means "no explicit Metal Flow mapping -> fall back to each flow
-    # sector's own party column", exactly like legacy's flowSectorKeys=null.
-    flow_sector_keys: frozenset[str] | None
-    unrestricted: bool = field(default=False)
+    unrestricted: bool
+    party_ids: frozenset[int]
+    flow_sector_ids: frozenset[int] | None
 
 
-def resolve_scope(db: Session, user: User) -> UserScope:
-    """Legacy getUserScope_(). `user` is None-safe upstream (routers/auth.py)."""
-    is_admin = user.role == UserRole.ADMIN and not user.admin_denied
+def is_administrator(user: AppUser) -> bool:
+    """Deny list always overrides an admin grant (CLAUDE.md section 6, rule 9).
 
-    if is_admin:
-        all_parties = sector_repo.list_parties(db)
+    Note this only suppresses ADMIN STATUS, never login — matching legacy, where
+    NON_ADMIN_EMAILS was consulted by isAdministrator_() alone.
+    """
+    if user.admin_denied:
+        return False
+    return bool(user.is_admin)
+
+
+def build_scope(
+    user: AppUser,
+    party_ids: list[int],
+    flow_sector_ids: list[int],
+    all_party_ids: list[int],
+) -> UserScope:
+    """Assemble a user's effective scope.
+
+    An administrator is unrestricted and sees every party. An operator sees only
+    the parties granted to them.
+    """
+    admin = is_administrator(user)
+    if admin:
         return UserScope(
+            user_id=user.user_id,
             email=user.email,
-            display_name=user.display_name or user.email,
             is_admin=True,
-            role="ADMIN",
-            parties=all_parties,
-            party_keys=frozenset(p.party_key for p in all_parties),
-            flow_sector_keys=None,
             unrestricted=True,
+            party_ids=frozenset(all_party_ids),
+            flow_sector_ids=None,
         )
 
-    parties = [s.party for s in user.party_scopes if s.party is not None]
-    flow_scope_rows = user.flow_scopes
-    flow_sector_keys = (
-        frozenset(s.flow_sector.sector_key for s in flow_scope_rows if s.flow_sector is not None)
-        if flow_scope_rows
-        else None
-    )
-
     return UserScope(
+        user_id=user.user_id,
         email=user.email,
-        display_name=user.display_name or user.email,
         is_admin=False,
-        role="OPERATOR",
-        parties=parties,
-        party_keys=frozenset(p.party_key for p in parties),
-        flow_sector_keys=flow_sector_keys,
         unrestricted=False,
+        party_ids=frozenset(party_ids),
+        # No explicit grants -> None, meaning "fall back to party".
+        flow_sector_ids=frozenset(flow_sector_ids) if flow_sector_ids else None,
     )
 
 
-def scope_allows(scope: UserScope, party_key: str | None) -> bool:
-    """Legacy scopeAllows_()."""
+def scope_allows_party(scope: UserScope, party_id: int | None) -> bool:
+    """Ports scopeAllows_()."""
     if scope.unrestricted:
         return True
-    if not party_key:
+    if party_id is None:
         return False
-    return party_key in scope.party_keys
+    return party_id in scope.party_ids
 
 
-def scope_allows_flow(scope: UserScope, sector_key: str, party_key: str | None) -> bool:
-    """
-    Legacy scopeAllowsFlow_(). An explicit flow_sector_keys mapping wins;
-    otherwise falls back to the sector's own party.
-    """
+def scope_allows_flow(scope: UserScope, flow_sector_id: int, party_id: int | None) -> bool:
+    """Ports scopeAllowsFlow_(): an explicit grant list wins; otherwise the
+    sector's party decides."""
     if scope.unrestricted:
         return True
-    if scope.flow_sector_keys is not None:
-        return sector_key in scope.flow_sector_keys
-    return scope_allows(scope, party_key)
-
-
-def scoped_allocation_sectors(db: Session, scope: UserScope) -> list[AllocationSector]:
-    """Legacy scopedSectorNames_().allocation."""
-    sectors = sector_repo.list_allocation_sectors(db)
-    if scope.unrestricted:
-        return sectors
-    return [s for s in sectors if scope_allows(scope, s.party.party_key if s.party else None)]
-
-
-def scoped_flow_sectors(db: Session, scope: UserScope) -> list[FlowSector]:
-    """Legacy scopedSectorNames_().flow."""
-    sectors = sector_repo.list_flow_sectors(db)
-    if scope.unrestricted:
-        return sectors
-    return [
-        s for s in sectors
-        if scope_allows_flow(scope, s.sector_key, s.party.party_key if s.party else None)
-    ]
-
-
-def apply_scope_to_allocation_model(model: AllocationModel, scope: UserScope) -> None:
-    """
-    Legacy applyScopeToAllocationModel_() (StagingService.gs's Phase 5C
-    section — scope filtering for every read path). Trims a Daily Allocation
-    model to the caller's party and marks Alloted/Balance read-only for an
-    operator; the cross-party totals are removed entirely since they
-    describe metal that is not theirs.
-    """
-    from rmas.services.validation_service import compute_totals, round3
-
-    model.role = scope.role
-    model.parties = scope.parties
-    model.is_operator = not scope.is_admin
-
-    if scope.unrestricted:
-        model.can_edit_required = not model.is_saved
-        model.can_edit_alloted = not model.is_saved
-        model.can_edit_acquired = not model.is_saved
-        model.show_global_totals = True
-        return
-
-    model.allocations = [a for a in model.allocations if scope_allows(scope, a.party_key)]
-    model.metal_flow = [f for f in model.metal_flow if scope_allows_flow(scope, f.sector_key, f.party_key)]
-
-    # Operators enter requirement and acquired metal but never allocate.
-    model.can_edit_required = not model.is_saved
-    model.can_edit_acquired = not model.is_saved
-    model.can_edit_alloted = False
-    model.show_global_totals = False
-
-    model.totals = compute_totals(model.allocations, model.metal_flow)
-    model.totals.remaining_to_allocate = Decimal("0")  # not an operator concept
-    model.total_previous_acquired = round3(sum((f.previous_acquired for f in model.metal_flow), Decimal("0")))
+    if scope.flow_sector_ids is not None:
+        return flow_sector_id in scope.flow_sector_ids
+    return scope_allows_party(scope, party_id)

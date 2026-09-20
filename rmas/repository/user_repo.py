@@ -1,40 +1,36 @@
-"""
-user_repo.py — identity, role and scope lookups.
-
-Replaces the config-list lookups in Config.gs / AuditService.gs
-(ADMIN_EMAILS, NON_ADMIN_EMAILS, USER_DISPLAY_NAMES, OPERATOR_PARTIES,
-OPERATOR_FLOW_SECTORS) with database reads — see models/user.py's docstring
-for why. Not part of CLAUDE.md's original five repository files; added
-because Google OAuth / Workspace SSO requires a real identity+scope store
-that did not exist in the sheet-based legacy system.
-"""
+"""repository/user_repo.py — the only place SQLAlchemy touches the user tables."""
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload, Session
+from sqlalchemy.orm import Session
 
-from rmas.models.user import User, UserFlowScope, UserPartyScope
+from models.user import AppUser, UserFlowScope, UserPartyScope
 
 
-def get_user_by_email(db: Session, email: str) -> User | None:
-    """Case-insensitive match, mirroring emailInList_'s trim+lowercase compare."""
+def get_user_by_email(db: Session, email: str) -> AppUser | None:
     normalized = email.strip().lower()
-    return db.scalar(
-        select(User)
-        .options(
-            selectinload(User.party_scopes).selectinload(UserPartyScope.party),
-            selectinload(User.flow_scopes).selectinload(UserFlowScope.flow_sector),
-        )
-        .where(User.email == normalized)
+    return db.scalar(select(AppUser).where(AppUser.email == normalized))
+
+
+def get_user_by_id(db: Session, user_id: int) -> AppUser | None:
+    return db.get(AppUser, user_id)
+
+
+def get_party_ids_for_user(db: Session, user_id: int) -> list[int]:
+    """The parties an operator may see. Empty for an admin, who is unrestricted."""
+    return list(
+        db.scalars(select(UserPartyScope.party_id).where(UserPartyScope.user_id == user_id))
     )
 
 
-def create_user(db: Session, *, email: str, display_name: str = "") -> User:
+def get_flow_sector_ids_for_user(db: Session, user_id: int) -> list[int]:
+    """Explicit flow-sector grants.
+
+    An EMPTY list means "fall back to the sector's party", not "no access" —
+    legacy's getUserScope_() returns flowSectorKeys: null in that case and
+    scopeAllowsFlow_() then matches on party. See models/user.py.
     """
-    First-seen provisioning: a Google-authenticated identity with no row yet
-    is created as a plain OPERATOR with no party scope (== "no party
-    assigned", same as an email absent from legacy's OPERATOR_PARTIES).
-    """
-    user = User(email=email.strip().lower(), display_name=display_name)
-    db.add(user)
-    db.flush()
-    return user
+    return list(
+        db.scalars(
+            select(UserFlowScope.flow_sector_id).where(UserFlowScope.user_id == user_id)
+        )
+    )

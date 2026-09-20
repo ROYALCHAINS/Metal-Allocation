@@ -1,65 +1,63 @@
 """
-date_service.py
+services/date_service.py
 Royal Metal Allocation System — Python port
 
-Ports DateService.gs. All dates are `datetime.date` (CLAUDE.md 6.6 — never a
-timezone-naive datetime); the legacy 'yyyy-MM-dd' string-key gymnastics exist
-only where a display string is genuinely needed. The application timezone is
-fixed at Asia/Kolkata (CLAUDE.md 6.7).
+Ports DateService.gs. The one rule that matters: for a selected date, the
+carry-forward "rule date" is Saturday if the selected date is a Monday,
+otherwise yesterday — encoding a six-day working week (CLAUDE.md section 6,
+rule 4). Do not simplify this to "always yesterday".
 
-THE BUSINESS RULE (do not "simplify" this — CLAUDE.md 6.4):
-    Monday        -> selected date - 2 days (Saturday)
-    Any other day -> selected date - 1 day
-This encodes the six-day working week.
+Legacy stored dates at 12:00 local specifically to survive DST/UTC rollover
+(CLAUDE.md section 6, rule 6). A proper PostgreSQL DATE column supersedes
+that hack — there is no `dateKeyToStorageDate_`/STORAGE_HOUR equivalent
+here, deliberately.
 """
 
-from datetime import date, timedelta
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from rmas.config import get_settings
+APP_TIMEZONE = "Asia/Kolkata"
 
-_MONTH_ABBR = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-]
-_WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-# Python's date.weekday(): Monday == 0.
-_MONDAY = 0
-
-
-def app_timezone() -> ZoneInfo:
-    return ZoneInfo(get_settings().app_timezone)
+# Mirrors DateService.gs's toDateKey_() accepted string formats.
+_DATE_STRING_FORMATS = (
+    "%Y-%m-%d",  # yyyy-MM-dd
+    "%d/%m/%Y",  # dd/MM/yyyy
+    "%d-%m-%Y",  # dd-MM-yyyy
+    "%d-%b-%Y",  # dd-MMM-yyyy, e.g. 17-Aug-2026
+)
 
 
-def today() -> date:
-    """Legacy todayKey_() — today's date in the application timezone."""
-    from datetime import datetime
+def to_date_key(value: date | datetime | str) -> date:
+    """Normalise any accepted legacy date representation to a `date`."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = value.strip()
+    for fmt in _DATE_STRING_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"Unrecognised date format: {value!r}")
 
-    return datetime.now(app_timezone()).date()
 
-
-def previous_source_date(selected_date: date) -> date:
-    """
-    Legacy previousSourceDateKey_(). Monday looks back to Saturday (-2 days);
+def previous_source_date(selected: date) -> date:
+    """The carry-forward rule date: Monday looks back to Saturday (-2 days),
     every other day looks back 1 day.
     """
-    if selected_date.weekday() == _MONDAY:
-        return selected_date - timedelta(days=2)
-    return selected_date - timedelta(days=1)
+    if selected.weekday() == 0:  # Monday
+        return selected - timedelta(days=2)
+    return selected - timedelta(days=1)
 
 
-def format_display_date(d: date | None) -> str:
-    """Legacy formatDisplayDate_() — e.g. 'Mon, 17-Aug-2026'. '' for None."""
-    if d is None:
-        return ""
-    weekday = _WEEKDAY_ABBR[d.weekday()]
-    month = _MONTH_ABBR[d.month - 1]
-    return f"{weekday}, {d.day:02d}-{month}-{d.year:04d}"
+def today_key(tz_name: str = APP_TIMEZONE) -> date:
+    """Today's date in the application timezone."""
+    return datetime.now(ZoneInfo(tz_name)).date()
 
 
-def short_date_label(d: date | None) -> str:
-    """Legacy shortDateLabel_() — e.g. '01 Sep', used on chart axes."""
-    if d is None:
-        return ""
-    return f"{d.day:02d} {_MONTH_ABBR[d.month - 1]}"
+def format_display_date(value: date) -> str:
+    """Mirrors DateService.gs's formatDisplayDate_(), e.g. 'Mon, 17-Aug-2026'."""
+    return value.strftime("%a, %d-%b-%Y")

@@ -1,194 +1,351 @@
 """
-validation_service.py
-Royal Metal Allocation System — Python port
+services/validation_service.py
+Royal Metal Allocation System — Python port of ValidationService.gs
 
-Ports ValidationService.gs's numeric helpers. Weights are Decimal end to end
-(CLAUDE.md critical rule #1) and rounded with ROUND_HALF_UP at every
-persistence boundary (#2). EPSILON (0.0005) is the only permitted way to
-compare two weights — never `==` (#2). MAX_WEIGHT_KG (100000) bounds every
-single numeric input (#3).
+PARTIAL PORT. Only the key-normalisation helpers are here so far; the rest of
+ValidationService.gs (computeTotals_, assertSaveRules_, assertRevisionReason_,
+the weight assertions) is still to be ported. The numeric helpers that were
+already needed live in services/weight_service.py.
+
+NORMALISATION — DISCREPANCY WITH DATABASE_OVERVIEW.md, deliberately resolved in
+favour of the legacy source (CLAUDE.md: "where this document and the legacy .gs
+source disagree, the legacy source wins").
+
+DATABASE_OVERVIEW.md says sector_key/party_key are "lowercase, with spaces,
+dashes and punctuation removed", describing that as mirroring legacy. It does
+not. ValidationService.gs:70-76 is:
+
+    String(name)
+      .replace(/[\\u2010-\\u2015\\u2212]/g, '-')   // en/em dash and minus -> hyphen
+      .replace(/\\s+/g, ' ')                      // collapse whitespace runs
+      .trim()
+      .toLowerCase();
+
+That is case-insensitive and whitespace-COLLAPSING, not whitespace-REMOVING,
+and it keeps punctuation. So 'Royal Chain' normalises to 'royal chain', not
+'royalchain'. Following the overview instead would make 'Royal Chain' and
+'RoyalChain' collide as one key, which legacy treats as two different sectors,
+and would not match keys derived from historical data.
 """
 
 import re
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Protocol
+from decimal import InvalidOperation
 
-from rmas.config import get_settings
-from rmas.rules.business_rules import BusinessRules
-from rmas.services.exceptions import ValidationError
+from rules.business_rules import MAX_WEIGHT_KG, business_rules
+from services.exceptions import ValidationError
+from services.weight_service import kg_to_grams
 
-_settings = get_settings()
-_QUANT = Decimal(10) ** -_settings.weight_decimals  # Decimal('0.001')
+# en dash, em dash, horizontal bar, minus sign, etc. -> plain hyphen
+_UNICODE_DASHES = re.compile("[‐-―−]")
+_WHITESPACE_RUN = re.compile(r"\s+")
 
-_DASH_VARIANTS = re.compile("[‐-―−]")
-_WHITESPACE = re.compile(r"\s+")
+_MAX_WEIGHT_G = kg_to_grams(MAX_WEIGHT_KG)
 
 
-def round3(value: Decimal | int | float | str | None) -> Decimal:
-    """Legacy round3_(). Non-numeric or None -> Decimal('0.000')."""
+def nearly_equal_g(left_g: int, right_g: int) -> bool:
+    """Legacy's nearlyEqual_(), translated to exact integer grams.
+
+    Legacy asks `abs(round3(a) - round3(b)) < 0.0005`. Both operands are already
+    rounded to 3 decimals, so their difference is a multiple of 0.001 kg — and
+    the smallest non-zero multiple, 0.001, is NOT less than 0.0005. The
+    comparison therefore only ever succeeds when the two are the same value.
+
+    In grams that is plain equality. The 0.0005 epsilon exists in legacy purely
+    to absorb binary-float representation error; integer grams have none, so
+    comparing exactly is both simpler and strictly more correct. Note this is
+    why EPSILON must NOT be naively converted to "1 gram" — that would wrongly
+    treat a real 1-gram difference as equal.
+    """
+    return left_g == right_g
+
+
+def normalize_key(name: str | None) -> str:
+    """Port of ValidationService.gs's normalizeSectorKey_().
+
+    normalizePartyKey_() delegated to the same function in legacy
+    (DataService.gs:51-53), so party keys and sector keys normalise identically.
+    """
+    text = "" if name is None else str(name)
+    text = _UNICODE_DASHES.sub("-", text)
+    text = _WHITESPACE_RUN.sub(" ", text)
+    return text.strip().lower()
+
+
+def _to_grams(value, label: str) -> int:
+    """Parse an inbound weight in kilograms into integer grams.
+
+    Mirrors legacy's coercion: null/empty is 0, and commas are stripped (the
+    sheet and the browser both produce '1,234.500'). A float is refused outright
+    — see services/weight_service.py.
+    """
     if value is None or value == "":
-        return Decimal("0.000")
+        return 0
+    if isinstance(value, str):
+        value = value.replace(",", "").strip()
+        if not value:
+            return 0
     try:
-        d = value if isinstance(value, Decimal) else Decimal(str(value))
-    except InvalidOperation:
-        return Decimal("0.000")
-    return d.quantize(_QUANT, rounding=ROUND_HALF_UP)
+        return kg_to_grams(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValidationError("INVALID_NUMBER", f"{label} must be a valid number.") from exc
+    except TypeError as exc:
+        raise ValidationError(
+            "INVALID_NUMBER", f"{label} must be a valid number (floats are not accepted)."
+        ) from exc
 
 
-def to_number(value: Decimal | int | float | str | None) -> Decimal:
-    """Legacy toNumber_() — parses a raw cell/input value, stripping thousands commas."""
-    if value is None or value == "":
-        return Decimal("0.000")
-    if isinstance(value, Decimal):
-        return round3(value)
-    s = str(value).replace(",", "").strip()
-    if not s:
-        return Decimal("0.000")
-    try:
-        return round3(Decimal(s))
-    except InvalidOperation:
-        return Decimal("0.000")
+def assert_signed_weight(value, label: str) -> int:
+    """A DERIVED weight that may legitimately be negative — returns grams.
 
-
-def fmt3(value: Decimal) -> str:
-    """Legacy fmt3_() — fixed 3-decimal string for display."""
-    return f"{round3(value):.3f}"
-
-
-def nearly_equal(a: Decimal, b: Decimal) -> bool:
-    """Legacy nearlyEqual_() — the ONLY sanctioned way to compare two weights."""
-    return abs(round3(a) - round3(b)) < _settings.weight_epsilon
-
-
-def normalize_sector_key(name: str | None) -> str:
+    Previous Requirement and Balance carry forward from the prior day's Balance,
+    and since an allocation may exceed the requirement that balance can be
+    negative, carrying the negative into the next day. Only the magnitude is
+    sanity-checked. Ports assertSignedWeight_().
     """
-    Legacy normalizeSectorKey_(). Never match a sector/party on row position —
-    always on this normalized key: dash variants -> hyphen, collapsed
-    whitespace, trimmed, lowercased.
+    grams = _to_grams(value, label)
+    if abs(grams) > _MAX_WEIGHT_G:
+        raise ValidationError("VALUE_TOO_LARGE", f"{label} exceeds the maximum permitted weight.")
+    return grams
+
+
+def assert_valid_weight(value, label: str) -> int:
+    """A weight INPUT, which may not be negative — returns grams.
+
+    Ports assertValidWeight_().
     """
-    if not name:
-        return ""
-    s = _DASH_VARIANTS.sub("-", str(name))
-    s = _WHITESPACE.sub(" ", s).strip()
-    return s.lower()
+    grams = _to_grams(value, label)
+    if grams < 0:
+        raise ValidationError("NEGATIVE_VALUE", f"{label} cannot be negative.")
+    if grams > _MAX_WEIGHT_G:
+        raise ValidationError("VALUE_TOO_LARGE", f"{label} exceeds the maximum permitted weight.")
+    return grams
 
 
-def assert_signed_weight(value: Decimal | int | float | str | None, label: str) -> Decimal:
+def compute_balance_g(previous_requirement_g: int, today_required_g: int, alloted_g: int) -> int:
+    """balance = previous_requirement + today_required - alloted.
+
+    The one equation the whole system exists to evaluate (CLAUDE.md section 1).
+    Exact in integer grams — legacy had to round the result because it worked in
+    binary floats.
     """
-    Legacy assertSignedWeight_(). For DERIVED weights allowed to be negative
-    (previous_requirement, balance) — an allocation may exceed the
-    requirement, so the resulting balance can be negative and legitimately
-    carries into the next day. Only the magnitude is sanity-checked.
-    """
-    raw = _parse_raw(value, label)
-    if abs(raw) > _settings.max_weight_kg:
-        raise ValidationError(f"{label} exceeds the maximum permitted weight.", code="VALUE_TOO_LARGE")
-    return round3(raw)
+    return previous_requirement_g + today_required_g - alloted_g
 
 
-def assert_valid_weight(value: Decimal | int | float | str | None, label: str) -> Decimal:
-    """Legacy assertValidWeight_(). For INPUT weights — may not be negative."""
-    raw = _parse_raw(value, label)
-    if raw < 0:
-        raise ValidationError(f"{label} cannot be negative.", code="NEGATIVE_VALUE")
-    if raw > _settings.max_weight_kg:
-        raise ValidationError(f"{label} exceeds the maximum permitted weight.", code="VALUE_TOO_LARGE")
-    return round3(raw)
-
-
-def _parse_raw(value: Decimal | int | float | str | None, label: str) -> Decimal:
-    if value is None or value == "":
-        return Decimal("0")
-    s = str(value).replace(",", "").strip() if not isinstance(value, Decimal) else value
-    try:
-        return Decimal(s) if not isinstance(s, Decimal) else s
-    except InvalidOperation as exc:
-        raise ValidationError(f"{label} must be a valid number.", code="INVALID_NUMBER") from exc
-
-
-class _HasAllocationFields(Protocol):
-    previous_requirement: Decimal
-    today_required: Decimal
-    alloted: Decimal
-    balance: Decimal
-
-
-class _HasAcquiredField(Protocol):
-    today_acquired: Decimal
-
-
-@dataclass
+@dataclass(frozen=True)
 class Totals:
-    """Legacy computeTotals_()'s return shape."""
+    """Every aggregate the business rules depend on, in grams.
 
-    total_previous_requirement: Decimal
-    total_today_required: Decimal
-    total_alloted: Decimal
-    total_balance: Decimal
-    total_acquired: Decimal
-    remaining_to_allocate: Decimal
+    Ports computeTotals_(). Legacy rounded each total after summing because
+    float addition drifts; integer sums are exact, so no rounding is needed and
+    the results are identical for any valid 3-decimal input.
+    """
+
+    total_previous_requirement_g: int
+    total_today_required_g: int
+    total_alloted_g: int
+    total_balance_g: int
+    total_acquired_g: int
+    remaining_to_allocate_g: int
 
 
-def compute_totals(
-    allocations: list[_HasAllocationFields], flows: list[_HasAcquiredField]
-) -> Totals:
-    """Legacy computeTotals_() — every aggregate the business rules depend on."""
-    total_prev = sum((a.previous_requirement for a in allocations), Decimal("0"))
-    total_today = sum((a.today_required for a in allocations), Decimal("0"))
-    total_alloted = sum((a.alloted for a in allocations), Decimal("0"))
-    total_balance = sum((a.balance for a in allocations), Decimal("0"))
-    total_acquired = sum((f.today_acquired for f in flows), Decimal("0"))
+def compute_totals(allocation_rows, flow_rows) -> Totals:
+    """`allocation_rows` need .previous_requirement_g/.today_required_g/
+    .alloted_g/.balance_g; `flow_rows` need .today_acquired_g."""
+    total_previous = sum(r.previous_requirement_g for r in allocation_rows)
+    total_required = sum(r.today_required_g for r in allocation_rows)
+    total_alloted = sum(r.alloted_g for r in allocation_rows)
+    total_balance = sum(r.balance_g for r in allocation_rows)
+    total_acquired = sum(r.today_acquired_g for r in flow_rows)
 
     return Totals(
-        total_previous_requirement=round3(total_prev),
-        total_today_required=round3(total_today),
-        total_alloted=round3(total_alloted),
-        total_balance=round3(total_balance),
-        total_acquired=round3(total_acquired),
-        remaining_to_allocate=round3(max(Decimal("0"), total_acquired - total_alloted)),
+        total_previous_requirement_g=total_previous,
+        total_today_required_g=total_required,
+        total_alloted_g=total_alloted,
+        total_balance_g=total_balance,
+        total_acquired_g=total_acquired,
+        # Legacy clamps at zero: over-allocating leaves nothing "remaining".
+        remaining_to_allocate_g=max(0, total_acquired - total_alloted),
     )
 
 
-def assert_save_rules(totals: Totals, rules: BusinessRules) -> None:
+def assert_save_rules(totals: Totals) -> None:
+    """The four togglable save rules. Ports assertSaveRules_().
+
+    Only REQUIRE_POSITIVE_ACQUIRED is enabled. The other three are disabled by
+    business decision and must not be re-enabled without instruction — there is
+    an unresolved conflict with an earlier "final business decisions" document
+    (CLAUDE.md section 6).
     """
-    Legacy assertSaveRules_(). Only require_positive_acquired is actually
-    reachable in the current business-rule configuration — the other three
-    checks are kept, exactly as in the legacy code, for the day they might be
-    switched back on, but CLAUDE.md is explicit: do not flip them without an
-    instruction.
-    """
-    if rules.require_positive_acquired and not (totals.total_acquired > 0):
+    if business_rules.require_positive_acquired and totals.total_acquired_g <= 0:
         raise ValidationError(
+            "NO_ACQUIRED_METAL",
             "Enter Today's Acquired metal in the Metal Flow panel before saving.",
-            code="NO_ACQUIRED_METAL",
         )
-    if rules.require_positive_alloted and not (totals.total_alloted > 0):
+
+    if business_rules.require_positive_alloted and totals.total_alloted_g <= 0:
         raise ValidationError(
-            "Enter the sector-wise Alloted quantities before saving.", code="NO_ALLOCATION"
+            "NO_ALLOCATION", "Enter the sector-wise Alloted quantities before saving."
         )
-    if rules.block_over_allocation and (totals.total_alloted - totals.total_acquired) > get_settings().weight_epsilon:
-        over = fmt3(totals.total_alloted - totals.total_acquired)
+
+    # Legacy: (totalAlloted - totalAcquired) > EPSILON. In exact grams any
+    # positive difference is a real over-allocation.
+    if business_rules.block_over_allocation and totals.total_alloted_g > totals.total_acquired_g:
         raise ValidationError(
-            f"Allocation exceeds Total Today’s Acquired by {over} kg. Reduce the allocation before saving.",
-            code="OVER_ALLOCATED",
+            "OVER_ALLOCATED",
+            "Allocation exceeds Total Today's Acquired. Reduce the allocation before saving.",
         )
-    if rules.require_full_allocation and not nearly_equal(totals.total_alloted, totals.total_acquired):
+
+    if business_rules.require_full_allocation and not nearly_equal_g(
+        totals.total_alloted_g, totals.total_acquired_g
+    ):
         raise ValidationError(
-            f"Complete the allocation before saving. {fmt3(totals.remaining_to_allocate)} kg is still remaining.",
-            code="INCOMPLETE_ALLOCATION",
+            "INCOMPLETE_ALLOCATION",
+            "Complete the allocation before saving; some acquired metal is still unallocated.",
         )
 
 
-def assert_revision_reason(reason: str | None, rules: BusinessRules) -> str:
-    """Legacy assertRevisionReason_()."""
-    text_value = (reason or "").strip()
-    if rules.require_revision_reason:
-        if not text_value:
-            raise ValidationError("A revision reason is mandatory.", code="REVISION_REASON_REQUIRED")
-        if len(text_value) < rules.min_revision_reason_length:
+@dataclass
+class NormalizedAllocationRow:
+    sector_id: int
+    sector_name: str
+    priority: str
+    purity: str
+    party_id: int
+    previous_requirement_g: int
+    today_required_g: int
+    alloted_g: int
+    balance_g: int
+
+
+@dataclass
+class NormalizedFlowRow:
+    flow_sector_id: int
+    sector_name: str
+    party_id: int
+    today_acquired_g: int
+
+
+@dataclass
+class NormalizedPayload:
+    allocations: list[NormalizedAllocationRow]
+    metal_flow: list[NormalizedFlowRow]
+    totals: Totals
+
+
+def validate_and_normalize_payload(
+    submitted_allocations,
+    submitted_flow,
+    allocation_defs,
+    flow_defs,
+) -> NormalizedPayload:
+    """Rebuild the payload from the live sector definitions. Ports
+    validateAndNormalizePayload_().
+
+    SECURITY: every identifying field — sector name, party, purity, priority —
+    is taken from the DATABASE definitions, never from the client. The client
+    supplies only the three weights. Submitted rows are matched by sector id, so
+    **row order can never corrupt a save**, and a row for a sector outside the
+    caller's definitions simply has nowhere to land.
+
+    `allocation_defs`/`flow_defs` are (sector, party) pairs from
+    repository/sector_repo.py, already narrowed to the caller's scope — so an
+    operator can only ever save rows for sectors they may see.
+    """
+    if not allocation_defs or not flow_defs:
+        raise ValidationError(
+            "INCOMPLETE_PAYLOAD",
+            "No sectors are mapped to your party. Ask an administrator to check the "
+            "Party column.",
+        )
+
+    submitted_alloc_by_id = {row.sector_id: row for row in submitted_allocations}
+    submitted_flow_by_id = {row.flow_sector_id: row for row in submitted_flow}
+
+    if len(submitted_alloc_by_id) != len(allocation_defs):
+        raise ValidationError(
+            "ALLOCATION_ROW_COUNT",
+            f"Expected {len(allocation_defs)} allocation rows but received "
+            f"{len(submitted_alloc_by_id)}.",
+        )
+    if len(submitted_flow_by_id) != len(flow_defs):
+        raise ValidationError(
+            "FLOW_ROW_COUNT",
+            f"Expected {len(flow_defs)} Metal Flow rows but received "
+            f"{len(submitted_flow_by_id)}.",
+        )
+
+    allocations = []
+    for sector, _party in allocation_defs:
+        submitted = submitted_alloc_by_id.get(sector.sector_id)
+        if submitted is None:
             raise ValidationError(
-                f"The revision reason must be at least {rules.min_revision_reason_length} characters.",
-                code="REVISION_REASON_TOO_SHORT",
+                "SECTOR_MISSING",
+                f'Allocation data for "{sector.sector_name}" was not received.',
             )
-    return text_value[:1000]
+
+        label = sector.sector_name
+        # Carried forward from the prior balance, so it may be negative.
+        previous_requirement_g = assert_signed_weight(
+            submitted.previous_requirement_kg, f"Previous Requirement ({label})"
+        )
+        today_required_g = assert_valid_weight(
+            submitted.today_required_kg, f"Today's Required Weight ({label})"
+        )
+        alloted_g = assert_valid_weight(submitted.alloted_kg, f"Alloted ({label})")
+
+        allocations.append(
+            NormalizedAllocationRow(
+                sector_id=sector.sector_id,
+                sector_name=sector.sector_name,
+                priority=sector.priority,
+                purity=sector.purity,
+                party_id=sector.party_id,
+                previous_requirement_g=previous_requirement_g,
+                today_required_g=today_required_g,
+                alloted_g=alloted_g,
+                balance_g=compute_balance_g(
+                    previous_requirement_g, today_required_g, alloted_g
+                ),
+            )
+        )
+
+    metal_flow = []
+    for flow_sector, _party in flow_defs:
+        submitted = submitted_flow_by_id.get(flow_sector.flow_sector_id)
+        if submitted is None:
+            raise ValidationError(
+                "FLOW_SECTOR_MISSING",
+                f'Metal Flow data for "{flow_sector.sector_name}" was not received.',
+            )
+        metal_flow.append(
+            NormalizedFlowRow(
+                flow_sector_id=flow_sector.flow_sector_id,
+                sector_name=flow_sector.sector_name,
+                party_id=flow_sector.party_id,
+                today_acquired_g=assert_valid_weight(
+                    submitted.today_acquired_kg, f"Today's Acquired ({flow_sector.sector_name})"
+                ),
+            )
+        )
+
+    return NormalizedPayload(
+        allocations=allocations,
+        metal_flow=metal_flow,
+        totals=compute_totals(allocations, metal_flow),
+    )
+
+
+def assert_revision_reason(reason: str | None) -> str:
+    """Ports assertRevisionReason_() — mandatory, min length, truncated at 1000."""
+    text = "" if reason is None else str(reason).strip()
+    if business_rules.require_revision_reason:
+        if not text:
+            raise ValidationError("REVISION_REASON_REQUIRED", "A revision reason is mandatory.")
+        if len(text) < business_rules.min_revision_reason_length:
+            raise ValidationError(
+                "REVISION_REASON_TOO_SHORT",
+                "The revision reason must be at least "
+                f"{business_rules.min_revision_reason_length} characters.",
+            )
+    return text[:1000]

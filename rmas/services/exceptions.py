@@ -1,85 +1,44 @@
 """
-exceptions.py — domain exceptions raised by the services/ layer.
+services/exceptions.py
+Royal Metal Allocation System — Python port
 
-Legacy equivalent: ValidationService.gs's appError_() (a machine `code` plus
-a safe `userMessage`) and handleServerError_() (never leaks a stack trace to
-the browser). Here the same two-part shape (code + safe message) is kept,
-but as real Python exceptions instead of an {ok,code,message,data} envelope,
-per CLAUDE.md's layering rule: services raise these, routers translate them
-to HTTP responses, and services never import HTTPException.
+Domain exceptions raised by services and translated to HTTP by routers.
+Services never import HTTPException (CLAUDE.md section 3).
+
+`code` carries the legacy error codes verbatim (`INVALID_NUMBER`,
+`NEGATIVE_VALUE`, `DATE_ALREADY_SAVED`, …) so responses stay comparable with
+the Apps Script build during the port.
 """
 
 
-class DomainError(Exception):
-    """Base for every exception a service is allowed to raise."""
+class RmasError(Exception):
+    """Base for every domain error. Ports legacy's appError_()."""
 
-    code: str = "ERROR"
-    default_status: int = 400
-
-    def __init__(self, message: str, code: str | None = None) -> None:
+    def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
+        self.code = code
         self.message = message
-        if code:
-            self.code = code
 
 
-class ValidationError(DomainError):
-    """Malformed or out-of-range input. Legacy: INVALID_*, *_TOO_LARGE, etc."""
-
-    code = "VALIDATION_ERROR"
-    default_status = 400
+class ValidationError(RmasError):
+    """Bad or inconsistent input. Maps to HTTP 400."""
 
 
-class AuthenticationError(DomainError):
-    """Missing or invalid Google ID token. Distinct from ScopeError (403):
-    this means WHO you are could not be established at all, not that the
-    identity you have is disallowed."""
-
-    code = "NOT_AUTHENTICATED"
-    default_status = 401
+class ScopeError(RmasError):
+    """The caller may not see or touch this party/sector. Maps to HTTP 403."""
 
 
-class ScopeError(DomainError):
-    """
-    The caller has no party/sector scope for what they asked for, or is not
-    authorized for the action at all. Legacy: NOT_AUTHORIZED, NO_PARTY_ASSIGNED,
-    SECTOR_NOT_IN_SCOPE.
-    """
-
-    code = "SCOPE_ERROR"
-    default_status = 403
+class NotAuthorizedError(RmasError):
+    """The caller lacks the role for this action. Maps to HTTP 403."""
 
 
-class NotFoundError(DomainError):
-    """Legacy: DATE_NOT_SAVED, AUDIT_ENTRY_NOT_FOUND."""
-
-    code = "NOT_FOUND"
-    default_status = 404
+class DuplicateRequestError(RmasError):
+    """A repeat of an already-processed request_id. Maps to HTTP 409."""
 
 
-class ConflictError(DomainError):
-    """
-    A date is already saved / already submitted / cannot be revised. Legacy:
-    DATE_ALREADY_SAVED, ALREADY_SUBMITTED, DATE_ALREADY_FINALISED.
-    """
-
-    code = "CONFLICT"
-    default_status = 409
+class DateAlreadySavedError(RmasError):
+    """The date is already committed; revise it instead. Maps to HTTP 409."""
 
 
-class DuplicateRequestError(DomainError):
-    """
-    A request_id was replayed inside the idempotency window. Legacy:
-    DUPLICATE_REQUEST — the router should treat this as "already handled",
-    not as a hard failure; see routers/allocations.py.
-    """
-
-    code = "DUPLICATE_REQUEST"
-    default_status = 409
-
-
-class LockTimeoutError(DomainError):
-    """Legacy: LOCK_TIMEOUT (LockService.getScriptLock, 30s)."""
-
-    code = "LOCK_TIMEOUT"
-    default_status = 503
+class LockTimeoutError(RmasError):
+    """Another write holds the per-date lock. Maps to HTTP 409."""

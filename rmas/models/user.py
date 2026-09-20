@@ -1,83 +1,82 @@
 """
-user.py — identity, role and scope. Replaces Config.gs's ADMIN_EMAILS /
-NON_ADMIN_EMAILS / USER_DISPLAY_NAMES / OPERATOR_PARTIES /
-OPERATOR_FLOW_SECTORS, and StagingService.gs's getUserScope_().
+models/user.py
+Royal Metal Allocation System — Python port
 
-DECISION NOTE (this port): the legacy system hard-coded these mappings in
-Config.gs. CLAUDE.md 6.15 already requires sector/party names to be data, not
-code; the same reasoning applies to who-can-see-what, so it is modelled as
-data here too rather than re-hard-coding email lists in config.py. The
-business RULE — an explicit deny always overrides an admin grant
-(CLAUDE.md 6.9) — is preserved exactly via `admin_denied`, resolved in
-services/scope_service.py, not here.
+Replaces Config.gs's ADMIN_EMAILS / NON_ADMIN_EMAILS / USER_DISPLAY_NAMES /
+OPERATOR_PARTIES / OPERATOR_FLOW_SECTORS.
 
-Authentication is Google OAuth / Workspace SSO: `email` is the verified
-identity from the Google ID token, matched case-insensitively as in legacy
-(emailInList_ trims and lowercases).
+`admin_denied` mirrors the legacy NON_ADMIN_EMAILS deny list, which always wins
+over an admin grant (CLAUDE.md section 6, rule 9). Note it only ever suppressed
+*admin status* in legacy — it never blocked login.
+
+`password_hash` is an addition to the supplied schema.sql, which predates the
+2026-09-20 switch to username/password login (CLAUDE.md section 6, rule 11).
+There is no signup page; it is only ever set by create_user.py.
+
+SCOPE — the null-fallback rule, ported from StagingService.gs:
+  getUserScope_() returns flowSectorKeys: null when an operator has no entry in
+  OPERATOR_FLOW_SECTORS, and scopeAllowsFlow_() then falls back to matching on
+  the sector's party. So ZERO rows in user_flow_scope means "derive flow access
+  from party", NOT "no flow access". Do not treat an empty grant list as a deny.
 """
 
-import enum
+from sqlalchemy import Boolean, ForeignKey, Integer, String, text
+from sqlalchemy.orm import Mapped, mapped_column
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from rmas.database import Base
+from database import Base
 
 
-class UserRole(str, enum.Enum):
-    ADMIN = "ADMIN"
-    OPERATOR = "OPERATOR"
+class AppUser(Base):
+    __tablename__ = "app_user"
 
-
-class User(Base):
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    # Stored lowercase/trimmed; comparisons are always case-insensitive,
-    # mirroring emailInList_'s trim+lowercase behaviour.
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    display_name: Mapped[str] = mapped_column(String(200), default="")
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, native_enum=False, length=20), default=UserRole.OPERATOR)
-
-    # An explicit deny always overrides an admin grant (CLAUDE.md 6.9),
-    # regardless of `role`. Resolved as: is_admin = (role == ADMIN) and not
-    # admin_denied.
-    admin_denied: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    party_scopes: Mapped[list["UserPartyScope"]] = relationship(back_populates="user")
-    flow_scopes: Mapped[list["UserFlowScope"]] = relationship(back_populates="user")
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean(create_constraint=True, name="ck_app_user_is_admin"),
+        nullable=False,
+        server_default=text("0"),
+    )
+    admin_denied: Mapped[bool] = mapped_column(
+        Boolean(create_constraint=True, name="ck_app_user_admin_denied"),
+        nullable=False,
+        server_default=text("0"),
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean(create_constraint=True, name="ck_app_user_is_active"),
+        nullable=False,
+        server_default=text("1"),
+    )
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("(datetime('now'))")
+    )
 
 
 class UserPartyScope(Base):
-    """An operator's allowed parties. Legacy: CONFIG.OPERATOR_PARTIES."""
+    """Which parties an operator may see. An admin is unrestricted and has no rows."""
 
     __tablename__ = "user_party_scope"
-    __table_args__ = (UniqueConstraint("user_id", "party_id", name="uq_user_party_scope"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    party_id: Mapped[int] = mapped_column(ForeignKey("parties.id"))
-
-    user = relationship("User", back_populates="party_scopes")
-    party = relationship("Party")
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    party_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("party.party_id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class UserFlowScope(Base):
-    """
-    An operator's allowed Metal Flow sectors. Legacy: CONFIG.OPERATOR_FLOW_SECTORS.
-
-    Absence of ANY row for a user is meaningful and distinct from an empty
-    list: it means "fall back to the flow sector's own Party column", exactly
-    as scopeAllowsFlow_ falls back to scopeAllows_ when flowSectorKeys is
-    null. services/scope_service.py must preserve that three-way distinction.
-    """
+    """Explicit flow-sector grants. ABSENT means fall back to the party — see the
+    module docstring. An empty grant list is not a deny."""
 
     __tablename__ = "user_flow_scope"
-    __table_args__ = (UniqueConstraint("user_id", "flow_sector_id", name="uq_user_flow_scope"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    flow_sector_id: Mapped[int] = mapped_column(ForeignKey("flow_sectors.id"))
-
-    user = relationship("User", back_populates="flow_scopes")
-    flow_sector = relationship("FlowSector")
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("app_user.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    flow_sector_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("flow_sector.flow_sector_id", ondelete="CASCADE"),
+        primary_key=True,
+    )

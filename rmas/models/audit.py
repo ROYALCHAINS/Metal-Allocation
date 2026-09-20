@@ -1,52 +1,85 @@
 """
-audit.py — the append-only audit log.
+models/audit.py
+Royal Metal Allocation System — Python port
 
-Legacy: AuditService.gs's writer + AuditReportService.gs's reader, backing
-the "Metal Allocation Audit Log" sheet. APPEND-ONLY: no service or router may
-issue an UPDATE or DELETE against this table, ever (CLAUDE.md 6.13).
+Append-only audit log. No UPDATE, no DELETE, ever — enforced by database
+triggers (see the migration), not merely by convention (CLAUDE.md section 6,
+rule 13). Failed and blocked attempts are logged too, not just successes
+(rule 14).
 
-user_email is stored as plain text, not a foreign key to users.id, so the
-audit trail survives a user being removed or renamed later — exactly as the
-legacy sheet recorded a plain email string per row.
-
-Snapshots are stored as JSON, matching the legacy compact JSON strings
-({p,s,pu,pr,tr,al,bl} per allocation row, {s,ac} per flow row) — decoding and
-diffing them is services/audit_service.py's job, not this model's.
+DEVIATION FROM THE SUPPLIED schema.sql — action_type CHECK list.
+schema.sql allows only the six AUDIT_ACTIONS from AuditService.gs. Legacy also
+writes three more to the same log, resolved lazily by StagingService.gs's
+stagingAuditAction_(): SUBMIT_REQUIREMENT, BLOCKED_RESUBMISSION and
+FAILED_SUBMISSION (StagingService.gs lines 28-33, 471, 509, 541). With the
+narrower list, every operator-submission audit write would be rejected by the
+CHECK at runtime once staging is ported. All nine legacy values are allowed
+here. This restores legacy fidelity rather than inventing anything — but it is
+a deliberate departure from the supplied DDL, so it is called out here.
 """
 
-from datetime import date as date_, datetime
-
-from sqlalchemy import JSON, Date, DateTime, Integer, String, Text
+from sqlalchemy import CheckConstraint, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from rmas.database import Base
+from database import Base
+
+# The complete set legacy actually writes: six from AuditService.gs's
+# AUDIT_ACTIONS plus three from StagingService.gs's stagingAuditAction_().
+AUDIT_ACTION_TYPES = (
+    "SAVE",
+    "REVISE",
+    "BLOCKED_DUPLICATE",
+    "FAILED_SAVE",
+    "FAILED_REVISION",
+    "UNAUTHORIZED_REVISION",
+    "SUBMIT_REQUIREMENT",
+    "BLOCKED_RESUBMISSION",
+    "FAILED_SUBMISSION",
+)
+
+AUDIT_STATUSES = ("SUCCESS", "BLOCKED", "FAILED")
+
+_ACTION_LIST = ", ".join(f"'{value}'" for value in AUDIT_ACTION_TYPES)
+_STATUS_LIST = ", ".join(f"'{value}'" for value in AUDIT_STATUSES)
 
 
-class AuditLogEntry(Base):
-    __tablename__ = "audit_log"
+class MetalAllocationAuditLog(Base):
+    __tablename__ = "metal_allocation_audit_log"
+    __table_args__ = (
+        CheckConstraint(
+            "allocation_date IS NULL OR "
+            "allocation_date IS strftime('%Y-%m-%d', allocation_date)",
+            name="ck_audit_date_format",
+        ),
+        CheckConstraint(f"action_type IN ({_ACTION_LIST})", name="ck_audit_action_type"),
+        CheckConstraint(f"action_status IN ({_STATUS_LIST})", name="ck_audit_action_status"),
+    )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    audit_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    audit_row_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    audit_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
 
-    # Nullable: a hard failure before the date was even resolved must still be
-    # logged (CLAUDE.md 6.14), so this cannot be NOT NULL.
-    allocation_date: Mapped[date_ | None] = mapped_column(Date, nullable=True, index=True)
+    # NULLABLE (migration 0004). A hard failure can be recorded before the
+    # allocation date was ever resolved, and the Audit Log must show it rather
+    # than refuse to store it — see the page spec's rule 4. The date window in
+    # audit_repo deliberately spares undated entries.
+    allocation_date: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    action_status: Mapped[str] = mapped_column(String, nullable=False)
 
-    # Free-text, not a DB enum: the legacy system defines audit actions in two
-    # places (AuditService.gs's six core actions plus StagingService.gs's
-    # three submission actions) and a future workflow may add more without a
-    # migration. services/audit_service.py owns the canonical list of values.
-    action_type: Mapped[str] = mapped_column(String(40), index=True)
+    revision_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    user_email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    action_timestamp: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("(datetime('now'))"), index=True
+    )
+    revision_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    revision_number: Mapped[int] = mapped_column(Integer, default=0)
-    user_email: Mapped[str] = mapped_column(String(320))
-    action_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    reason: Mapped[str] = mapped_column(Text, default="")
+    # Full before/after state as JSON, kept verbatim so a revision can be
+    # diffed or replayed long after the sector definitions have changed.
+    previous_allocation_data: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_allocation_data: Mapped[str | None] = mapped_column(String, nullable=True)
+    previous_metal_flow_data: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_metal_flow_data: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    previous_allocation_data: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    updated_allocation_data: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    previous_flow_data: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    updated_flow_data: Mapped[list | None] = mapped_column(JSON, nullable=True)
-
-    request_id: Mapped[str] = mapped_column(String(120), default="", index=True)
-    action_status: Mapped[str] = mapped_column(String(20))  # SUCCESS | BLOCKED | FAILED
+    request_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

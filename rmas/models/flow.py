@@ -1,32 +1,44 @@
 """
-flow.py — Metal Flow Master: one immutable row per (flow_date, flow_sector).
+models/flow.py
+Royal Metal Allocation System — Python port
 
-Legacy: DataService.gs's Metal Flow Master reads/writes
-(readFlowMasterRows_, buildFlowRowValues_). acquired is a validated
-non-negative input (assertValidWeight_).
+The supply ledger (legacy "Metal Flow Master"). Metal arriving, per date, per
+flow sector. Weights are INTEGER GRAMS — see models/allocation.py's docstring.
 """
 
-from datetime import date as date_
-from decimal import Decimal
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, UniqueConstraint, text
+from sqlalchemy.orm import Mapped, mapped_column
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from rmas.database import Base
-
-WEIGHT = Numeric(12, 3, asdecimal=True)
+from database import Base
 
 
-class FlowRecord(Base):
-    __tablename__ = "metal_flow"
+class MetalFlowMaster(Base):
+    __tablename__ = "metal_flow_master"
     __table_args__ = (
-        UniqueConstraint("flow_date", "flow_sector_id", name="uq_flow_date_sector"),
-        CheckConstraint("acquired >= 0", name="ck_flow_acquired_nonneg"),
+        UniqueConstraint("allocation_date", "flow_sector_id", name="uq_flow_date_sector"),
+        CheckConstraint(
+            "allocation_date IS strftime('%Y-%m-%d', allocation_date)",
+            name="ck_flow_date_format",
+        ),
+        CheckConstraint("acquired_g >= 0", name="ck_flow_acquired_non_negative"),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    flow_date: Mapped[date_] = mapped_column(Date, index=True)
-    flow_sector_id: Mapped[int] = mapped_column(ForeignKey("flow_sectors.id"))
-    acquired: Mapped[Decimal] = mapped_column(WEIGHT)
+    flow_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    allocation_date: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
-    flow_sector = relationship("FlowSector")
+    flow_sector_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("flow_sector.flow_sector_id"), nullable=False
+    )
+    party_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("party.party_id"), nullable=False
+    )
+
+    acquired_g: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+    revision_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    saved_by: Mapped[str] = mapped_column(String, nullable=False)
+    saved_at: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("(datetime('now'))")
+    )

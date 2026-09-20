@@ -1,49 +1,68 @@
 """
-allocation.py — Metal Master: one immutable row per (allocation_date, sector).
+models/allocation.py
+Royal Metal Allocation System — Python port
 
-Legacy: DataService.gs's Metal Master reads/writes (readMasterRows_,
-buildMasterRowValues_, appendBothMasters_). Rows are appended by
-saveDailyAllocation() and replaced wholesale (delete + re-insert) only by
-reviseDailyAllocation() — see services/allocation_service.py.
+The allocation ledger (legacy "Metal Master"). DEMAND side.
 
-previous_requirement and balance are SIGNED: an earlier over-allocation
-carries a negative balance forward as next day's previous_requirement, which
-assertSignedWeight_ only bounds in magnitude, never in sign. today_required
-and alloted are validated non-negative inputs (assertValidWeight_), hence the
-CHECK constraints below.
+WEIGHTS ARE INTEGER GRAMS, never float, never REAL (schema.sql design note).
+The legacy system worked in kilograms to exactly 3 decimals, and 3 decimals of a
+kilogram is precisely 1 gram, so integer grams is a lossless representation with
+no floating-point drift. The `_g` suffix makes the unit impossible to mistake.
+Convert at the application boundary via services/weight_service.py.
+
+`priority_snapshot`/`purity_snapshot` are deliberately denormalised: the sheet
+carried them on every row, and keeping them means a historical row still reports
+the priority and purity that applied ON THAT DATE, even after the sector
+definition is later edited.
+
+Both snapshots are TEXT. `priority_snapshot` is a departure from schema.sql's
+`INTEGER`, kept consistent with `sector.priority` — see models/sector.py.
 """
 
-from datetime import date as date_
-from decimal import Decimal
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, UniqueConstraint, text
+from sqlalchemy.orm import Mapped, mapped_column
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from rmas.database import Base
-
-WEIGHT = Numeric(12, 3, asdecimal=True)
+from database import Base
 
 
-class AllocationRecord(Base):
-    __tablename__ = "allocations"
+class MetalMaster(Base):
+    __tablename__ = "metal_master"
     __table_args__ = (
-        UniqueConstraint("allocation_date", "sector_id", name="uq_allocation_date_sector"),
-        CheckConstraint("today_required >= 0", name="ck_allocation_today_required_nonneg"),
-        CheckConstraint("alloted >= 0", name="ck_allocation_alloted_nonneg"),
+        # One row per sector per date. A revision REPLACES the date's rows,
+        # exactly as legacy's deleteRowsForDate_() + appendBothMasters_() did.
+        UniqueConstraint("allocation_date", "sector_id", name="uq_master_date_sector"),
+        CheckConstraint(
+            "allocation_date IS strftime('%Y-%m-%d', allocation_date)",
+            name="ck_master_date_format",
+        ),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    allocation_date: Mapped[date_] = mapped_column(Date, index=True)
-    sector_id: Mapped[int] = mapped_column(ForeignKey("allocation_sectors.id"))
+    allocation_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    allocation_date: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
-    # Denormalized at save time, mirroring the legacy master row which froze
-    # priority/purity into the row rather than re-joining Metal Generator.
-    priority: Mapped[str] = mapped_column(default="")
-    purity: Mapped[str] = mapped_column(default="Any")
+    sector_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sector.sector_id"), nullable=False
+    )
+    party_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("party.party_id"), nullable=False
+    )
 
-    previous_requirement: Mapped[Decimal] = mapped_column(WEIGHT)  # signed
-    today_required: Mapped[Decimal] = mapped_column(WEIGHT)
-    alloted: Mapped[Decimal] = mapped_column(WEIGHT)
-    balance: Mapped[Decimal] = mapped_column(WEIGHT)  # signed
+    priority_snapshot: Mapped[str] = mapped_column(String, nullable=False)
+    purity_snapshot: Mapped[str] = mapped_column(String, nullable=False)
 
-    sector = relationship("AllocationSector")
+    previous_requirement_g: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    today_required_g: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    alloted_g: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    balance_g: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+    revision_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    saved_by: Mapped[str] = mapped_column(String, nullable=False)
+    saved_at: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("(datetime('now'))")
+    )

@@ -1,9 +1,17 @@
 /* ==================================================================
-   Royal Metal Allocation System — audit.css
-   Ported from StylesAudit.html. Additions only — tokens.css and
-   reports.css load first (in that order); this file's later selectors
-   intentionally win the cascade (role-pill, .btn--link, .access-gate,
-   .page/.app-header__inner/.view-nav__inner width overrides).
+   audit.css — ported verbatim from legacy's StylesAudit.html.
+
+   Additions only. tokens.css (Styles.html) and reports.css
+   (StylesReports.html) load first and declare every token used here;
+   CLAUDE.md section 7 requires that load order be preserved.
+
+   Ported across rather than rebuilt: this file and Audit.html's markup
+   are a matched pair.
+   ================================================================== */
+
+/* ==================================================================
+   Royal Metal Allocation System — StylesAudit.html (Phase 3)
+   Additions only. Styles.html and StylesReports.html load first.
    ================================================================== */
 
 /* --------------------------- ACTION BADGES ------------------------ */
@@ -50,7 +58,7 @@
 
 /* ==================================================================
    LAYOUT WIDTH OVERRIDE
-   Loads after tokens.css and reports.css, so these win.
+   Loads after Styles.html and StylesReports.html, so these win.
    Change the three max-width values together to keep the header, the tab
    bar and the page body aligned. Use 'none' for edge-to-edge.
    ================================================================== */
@@ -87,7 +95,7 @@
   background:linear-gradient(135deg,var(--gold-500),var(--gold-600));
   color:var(--navy-900);
 }
-.role-pill--operator,.role-pill--user{background:#24406f;color:#d6e0f2;}
+.role-pill--operator{background:#24406f;color:#d6e0f2;}
 
 /* The role pill stays visible on every breakpoint, including the narrow
    widths where the signed-in email is hidden. */

@@ -1,395 +1,578 @@
 /**
- * views/audit.js — administrator-only audit log viewer and snapshot
- * comparison. Ported from Audit.html. Read-only, independent of the other
- * view modules.
+ * views/audit.js — the Audit Log.
+ *
+ * Built to PROMPT_audit_log.md. Administrator-only, read-only, backed by an
+ * append-only log. No update path, no delete path.
+ *
+ * TWO LAYERS OF GATING, AND ONLY ONE OF THEM IS PROTECTION. The card below is
+ * a convenience so a non-admin sees an explanation instead of an error; the
+ * real control is that every /audit endpoint re-checks admin status on the
+ * server. If that check is ever relaxed, hiding this view changes nothing.
+ * A 403 mid-session re-applies the gate, so a revoked administrator loses the
+ * view without reloading.
+ *
+ * Failures and blocked attempts are first-class entries here, not errors to
+ * suppress — the log answers "what was attempted", not merely "what happened".
  */
 
-import * as auditApi from '../api/audit.js';
-import * as authApi from '../api/auth.js';
-import { esc, fmt3, shiftIso } from '../lib/format.js';
-import { $, hideOverlay, showOverlay, toast } from '../components/shell.js';
+import { AuthError, getAuditEntry, getAuditFilterOptions, getAuditLog } from '../api/audit.js';
+import { escapeHtml } from '../components/appHeader.js';
+import { fmt3 } from '../lib/format.js';
 
-const A = { isAdmin: false, accessChecked: false, options: null, loadedOnce: false, busy: false, rows: [] };
+const DASH = '—';
 
-function fmtOrDash(n) {
-  return n === null || n === undefined ? '—' : fmt3(n);
-}
+/** Action type to its badge modifier. Unknown actions get the neutral one. */
+const BADGE_CLASS = {
+  SAVE: 'save',
+  REVISE: 'revise',
+  BLOCKED_DUPLICATE: 'blocked',
+  FAILED_SAVE: 'failed',
+  FAILED_REVISION: 'failed',
+  UNAUTHORIZED_REVISION: 'unauth',
+  SUBMIT_REQUIREMENT: 'save',
+  BLOCKED_RESUBMISSION: 'blocked',
+  FAILED_SUBMISSION: 'failed',
+};
 
 function actionBadge(action) {
-  const map = {
-    SAVE: 'save', REVISE: 'revise', BLOCKED_DUPLICATE: 'blocked',
-    FAILED_SAVE: 'failed', FAILED_REVISION: 'failed', UNAUTHORIZED_REVISION: 'unauth',
-  };
-  const cls = map[action] || 'other';
-  const label = String(action || '—').replace(/_/g, ' ');
-  return `<span class="audit-badge audit-badge--${cls}">${esc(label)}</span>`;
+  const modifier = BADGE_CLASS[action] || 'other';
+  return `<span class="audit-badge audit-badge--${modifier}">${escapeHtml(
+    String(action).replace(/_/g, ' ')
+  )}</span>`;
 }
 
+/** SUCCESS and BLOCKED are named; everything else reads as a failure. */
 function statusDot(status) {
-  const cls = status === 'SUCCESS' ? 'success' : status === 'BLOCKED' ? 'blocked' : 'failed';
-  return `<span class="status-dot status-dot--${cls}">${esc(status || '—')}</span>`;
+  const modifier =
+    status === 'SUCCESS' ? 'success' : status === 'BLOCKED' ? 'blocked' : 'failed';
+  return `<span class="status-dot status-dot--${modifier}">${escapeHtml(status)}</span>`;
 }
 
-async function checkAccess() {
-  if (A.accessChecked) return;
-  try {
-    const access = await authApi.getCurrentUserAccess();
-    A.accessChecked = true;
-    A.isAdmin = !!access.is_admin;
-  } catch (err) {
-    A.accessChecked = true;
-    A.isAdmin = false;
-    console.error(err);
-  }
-  applyAccess();
+function revChip(revisionNumber) {
+  return revisionNumber > 0
+    ? `<span class="rev-chip">#${revisionNumber}</span>`
+    : '<span class="rev-chip rev-chip--original">Original</span>';
 }
 
-function applyAccess() {
-  $('tabAudit').classList.toggle('hidden', !A.isAdmin);
-  $('auditGate').classList.toggle('hidden', A.isAdmin);
-  $('auditContent').classList.toggle('hidden', !A.isAdmin);
+/** A missing weight is an em-dash, never 0.000 — absence and zero differ. */
+const weight = (value) => (value === null || value === undefined ? DASH : fmt3(value));
 
-  const pill = $('hdrRole');
-  if (!pill) return;
-  if (A.isAdmin) {
-    pill.className = 'role-pill role-pill--admin';
-    pill.textContent = 'Admin';
-  } else {
-    pill.className = 'role-pill role-pill--user';
-    pill.textContent = 'User';
-  }
-}
+/** [change-flag key, column heading, payload field] for the four diff pairs. */
+const ALLOCATION_FIELDS = [
+  ['previous_requirement', 'Prev. Req.', 'previous_requirement_kg'],
+  ['today_required', 'Required', 'today_required_kg'],
+  ['alloted', 'Alloted', 'alloted_kg'],
+  ['balance', 'Balance', 'balance_kg'],
+];
 
-async function ensureOptions() {
-  if (A.options) return;
-  showOverlay('Loading audit filters…');
-  try {
-    const o = await auditApi.getAuditFilterOptions();
-    hideOverlay();
-    A.options = o;
-    populateFilters();
-  } catch (err) {
-    hideOverlay();
-    if (err.code === 'NOT_AUTHORIZED') {
-      A.isAdmin = false;
-      applyAccess();
-      return;
-    }
-    toast('error', err.message || 'Audit filters could not be loaded. Check the connection and retry.');
-    console.error(err);
-  }
-}
+export function renderAuditView(container, user) {
+  // The server is the authority; this only decides what to draw first.
+  let isAdmin = user.role === 'admin';
+  let options = null;
 
-function fillSelect(id, values, allLabel) {
-  const el = $(id);
-  if (!el) return;
-  let html = `<option value="all">${esc(allLabel)}</option>`;
-  values.forEach((v) => {
-    const label = String(v).replace(/_/g, ' ');
-    html += `<option value="${esc(v)}">${esc(label)}</option>`;
-  });
-  el.innerHTML = html;
-}
-
-function populateFilters() {
-  const o = A.options;
-  fillSelect('auAction', o.actions, 'All actions');
-  fillSelect('auStatus', o.statuses, 'All statuses');
-  fillSelect('auUser', o.users, 'All users');
-  $('auFrom').value = o.suggested_from || '';
-  $('auTo').value = o.suggested_to || '';
-  if (o.entry_count) {
-    $('tabCountAudit').textContent = o.entry_count;
-    $('tabCountAudit').classList.remove('hidden');
-  }
-}
-
-function applyQuickRange(days, btn) {
-  btn.parentNode.querySelectorAll('.quick-range__btn').forEach((b) => b.classList.remove('is-active'));
-  btn.classList.add('is-active');
-  const o = A.options || {};
-  if (Number(days) === 0) {
-    $('auFrom').value = o.min_date || '';
-    $('auTo').value = o.max_date || '';
-  } else {
-    const to = o.max_date || '';
-    if (!to) return;
-    let from = shiftIso(to, -(Number(days) - 1));
-    if (o.min_date && from < o.min_date) from = o.min_date;
-    $('auFrom').value = from;
-    $('auTo').value = to;
-  }
-}
-
-function updateAuditFilterCount() {
-  const node = $('auFilterCount');
-  if (!node) return;
-  let n = 0;
-  if ($('auFrom').value || $('auTo').value) n++;
-  ['auAction', 'auStatus', 'auUser'].forEach((id) => {
-    if ($(id).value && $(id).value !== 'all') n++;
-  });
-  node.textContent = n === 0 ? 'No filters active' : `${n} filter${n === 1 ? '' : 's'} active`;
-}
-
-function auditFilters() {
-  updateAuditFilterCount();
-  return {
-    from_date: $('auFrom').value || null,
-    to_date: $('auTo').value || null,
-    action_type: $('auAction').value,
-    status: $('auStatus').value,
-    user: $('auUser').value,
-  };
-}
-
-async function loadAuditLog() {
-  if (A.busy || !A.isAdmin) return;
-  A.busy = true;
-  showOverlay('Loading the audit log…');
-  try {
-    const data = await auditApi.getAuditLog(auditFilters());
-    A.busy = false;
-    hideOverlay();
-    A.loadedOnce = true;
-    A.rows = data.rows;
-    renderAuditLog(data);
-  } catch (err) {
-    A.busy = false;
-    hideOverlay();
-    if (err.code === 'NOT_AUTHORIZED') {
-      A.isAdmin = false;
-      applyAccess();
-      return;
-    }
-    toast('error', err.message || 'The audit log could not be loaded. Check the connection and retry.');
-    console.error(err);
-  }
-}
-
-function renderAuditLog(data) {
-  const s = data.summary;
-  $('auStatTotal').textContent = s.counts.total;
-  $('auStatSuccess').textContent = s.counts.success;
-  $('auStatBlocked').textContent = s.counts.blocked;
-  $('auStatFailed').textContent = s.counts.failed;
-  $('auStatRevisions').textContent = s.counts.revisions;
-  $('auRowChip').textContent = `${s.returned_count} entries`;
-
-  const html = data.rows.map((r) => `
-    <tr>
-      <td class="date-cell" data-label="Timestamp">${esc(r.timestamp_display || '—')}</td>
-      <td data-label="Allocation Date">${esc(r.allocation_date_display)}</td>
-      <td data-label="Action">${actionBadge(r.action_type)}</td>
-      <td data-label="Revision">${r.revision_number > 0 ? `<span class="rev-chip">#${r.revision_number}</span>` : '<span class="rev-chip rev-chip--original">Original</span>'}</td>
-      <td data-label="User">${esc(r.user_email || '—')}</td>
-      <td data-label="Reason"><span class="reason-text">${esc(r.reason_preview || '—')}</span></td>
-      <td data-label="Status">${statusDot(r.status)}</td>
-      <td data-label="Audit ID"><span class="audit-id">${esc(r.audit_id)}</span></td>
-      <td data-label="Detail"><button type="button" class="btn--link js-audit-detail" data-audit-id="${esc(r.audit_id)}" ${r.has_snapshots ? '' : 'disabled'}>${r.has_snapshots ? 'View changes' : 'No snapshot'}</button></td>
-    </tr>`).join('');
-
-  $('auBody').innerHTML = html;
-  $('auEmpty').classList.toggle('hidden', data.rows.length > 0);
-  $('auTable').classList.toggle('hidden', data.rows.length === 0);
-
-  const trunc = $('auTruncated');
-  if (s.truncated) {
-    trunc.textContent = `Showing the most recent ${s.returned_count} of ${s.record_count} matching entries. Narrow the date range or filters to see older entries.`;
-    trunc.classList.remove('hidden');
-  } else {
-    trunc.classList.add('hidden');
-  }
-}
-
-function metaItem(label, value) {
-  return `<div class="detail-meta__item"><div class="detail-meta__label">${esc(label)}</div><div class="detail-meta__value">${value}</div></div>`;
-}
-
-function fieldLabel(field) {
-  const map = { previous_requirement: 'Prev. Req.', today_required: 'Required', alloted: 'Alloted', balance: 'Balance' };
-  return map[field] || field;
-}
-
-function allocationDiffTable(diff, totals) {
-  if (!diff.length) return '';
-
-  const body = diff.map((d) => {
-    const rowCls = d.only_after ? ' class="row-added"' : d.only_before ? ' class="row-removed"' : '';
-    const cell = (field, side, isBefore) => {
-      const value = side ? side[field] : null;
-      const cls = `${isBefore ? 'cell-before' : 'cell-after'} num${d.changed[field] ? ' is-changed' : ''}`;
-      const label = `${isBefore ? 'Before ' : 'After '}${fieldLabel(field)}`;
-      return `<td class="${cls}" data-label="${esc(label)}">${fmtOrDash(value)}</td>`;
-    };
-    return `<tr${rowCls}>
-      <td class="sector-col" data-label="Sector">${esc(d.sector)}${d.only_after ? ' <span class="audit-badge audit-badge--save">added</span>' : ''}${d.only_before ? ' <span class="audit-badge audit-badge--failed">removed</span>' : ''}</td>
-      ${cell('previous_requirement', d.before, true)}${cell('previous_requirement', d.after, false)}
-      ${cell('today_required', d.before, true)}${cell('today_required', d.after, false)}
-      ${cell('alloted', d.before, true)}${cell('alloted', d.after, false)}
-      ${cell('balance', d.before, true)}${cell('balance', d.after, false)}
-    </tr>`;
-  }).join('');
-
-  const b = totals.before_allocation, a = totals.after_allocation;
-
-  return `<div class="diff-wrap"><table class="diff-table">
-    <thead><tr>
-      <th>Sector</th>
-      <th class="num group-before">Prev. Req. (before)</th><th class="num group-after">Prev. Req. (after)</th>
-      <th class="num group-before">Required (before)</th><th class="num group-after">Required (after)</th>
-      <th class="num group-before">Alloted (before)</th><th class="num group-after">Alloted (after)</th>
-      <th class="num group-before">Balance (before)</th><th class="num group-after">Balance (after)</th>
-    </tr></thead>
-    <tbody>${body}</tbody>
-    <tfoot><tr>
-      <td data-label="Totals">Totals (${b.count} → ${a.count} rows)</td>
-      <td class="num" data-label="Prev. Req. (before)">${fmt3(b.previous_requirement)}</td>
-      <td class="num" data-label="Prev. Req. (after)">${fmt3(a.previous_requirement)}</td>
-      <td class="num" data-label="Required (before)">${fmt3(b.today_required)}</td>
-      <td class="num" data-label="Required (after)">${fmt3(a.today_required)}</td>
-      <td class="num" data-label="Alloted (before)">${fmt3(b.alloted)}</td>
-      <td class="num" data-label="Alloted (after)">${fmt3(a.alloted)}</td>
-      <td class="num" data-label="Balance (before)">${fmt3(b.balance)}</td>
-      <td class="num" data-label="Balance (after)">${fmt3(a.balance)}</td>
-    </tr></tfoot>
-  </table></div>`;
-}
-
-function flowDiffTable(diff, totals) {
-  if (!diff.length) return '';
-  const body = diff.map((d) => {
-    const rowCls = d.only_after ? ' class="row-added"' : d.only_before ? ' class="row-removed"' : '';
-    const changedCls = d.changed ? ' is-changed' : '';
-    return `<tr${rowCls}>
-      <td class="sector-col" data-label="Sector">${esc(d.sector)}</td>
-      <td class="cell-before num${changedCls}" data-label="Acquired (before)">${fmtOrDash(d.before)}</td>
-      <td class="cell-after num${changedCls}" data-label="Acquired (after)">${fmtOrDash(d.after)}</td>
-    </tr>`;
-  }).join('');
-
-  return `<div class="diff-wrap"><table class="diff-table">
-    <thead><tr><th>Sector</th><th class="num group-before">Acquired (before)</th><th class="num group-after">Acquired (after)</th></tr></thead>
-    <tbody>${body}</tbody>
-    <tfoot><tr>
-      <td data-label="Totals">Totals</td>
-      <td class="num" data-label="Acquired (before)">${fmt3(totals.before_flow.acquired)}</td>
-      <td class="num" data-label="Acquired (after)">${fmt3(totals.after_flow.acquired)}</td>
-    </tr></tfoot>
-  </table></div>`;
-}
-
-function renderDetail(d) {
-  $('auditModalTitle').textContent = `Audit Entry — ${d.allocation_date_display}`;
-
-  let html = '<div class="detail-meta">' +
-    metaItem('Action', actionBadge(d.action_type)) +
-    metaItem('Status', statusDot(d.status)) +
-    metaItem('Revision', d.revision_number > 0 ? `#${d.revision_number}` : 'Original save') +
-    metaItem('User', esc(d.user_email || '—')) +
-    metaItem('Timestamp', esc(d.timestamp_display || '—')) +
-    metaItem('Audit ID', `<span class="audit-id">${esc(d.audit_id)}</span>`) +
-    metaItem('Request ID', `<span class="audit-id">${esc(d.request_id || '—')}</span>`) +
-    metaItem('Sectors changed', `${d.changed_sectors} allocation · ${d.changed_flow_sectors} flow`) +
-  '</div>';
-
-  if (d.reason) {
-    html += `<div class="detail-reason"><span class="detail-reason__label">Reason</span>${esc(d.reason)}</div>`;
-  }
-
-  if (!d.has_before && d.has_after) {
-    html += '<div class="snapshot-note">This is an original save, so there is no earlier state to compare against. The "before" columns are empty by design.</div>';
-  } else if (!d.has_before && !d.has_after) {
-    html += '<div class="snapshot-note">This entry records a blocked or failed action, so no data snapshot was captured. Nothing in either master sheet was changed.</div>';
-  }
-
-  if (d.allocation_diff.length) {
-    html += `<div class="detail-section">
-      <div class="detail-section__head"><h4 class="detail-section__title">Allocation Data</h4><span class="detail-section__note">${d.changed_sectors} sector(s) changed</span></div>
-      ${allocationDiffTable(d.allocation_diff, d.totals)}
-      <div class="diff-legend">
-        <span class="legend-key"><span class="legend-swatch" style="background:#fdf0d8;border:1px solid #f2ddb0"></span>Changed value</span>
-        <span class="legend-key"><span class="legend-swatch" style="background:#e3f5ec"></span>Sector added</span>
-        <span class="legend-key"><span class="legend-swatch" style="background:#fbe4e4"></span>Sector removed</span>
+  container.innerHTML = `
+    <div class="card access-gate hidden" id="auditGate">
+      <div class="access-gate__icon" aria-hidden="true">!</div>
+      <div class="access-gate__title">Administrator access required</div>
+      <div class="access-gate__text">
+        The audit log contains user identities and full data snapshots, so it is
+        restricted to authorized administrators. Contact your administrator if you
+        need access to this record.
       </div>
-    </div>`;
+    </div>
+
+    <div id="auditContent">
+      <div class="card filter-bar">
+        <div class="filter-bar__head">
+          <div class="filter-bar__title">
+            <span class="filter-bar__icon" aria-hidden="true">&#9660;</span>
+            <span class="filter-bar__heading">Filter &amp; Query Controls</span>
+          </div>
+          <div class="filter-bar__applied">
+            Applied: <strong id="auFilterCount">No filters active</strong>
+          </div>
+        </div>
+        <div class="filter-bar__grid filter-bar__grid--audit">
+          <div class="filter-group filter-group--dates">
+            <div class="filter-field">
+              <label class="field-label" for="auFrom">Allocation Date From</label>
+              <input type="date" id="auFrom" class="input input--date">
+            </div>
+            <span class="filter-arrow" aria-hidden="true">&rarr;</span>
+            <div class="filter-field">
+              <label class="field-label" for="auTo">Allocation Date To</label>
+              <input type="date" id="auTo" class="input input--date">
+            </div>
+          </div>
+          <div class="filter-group filter-group--selects filter-group--selects-3">
+            <div class="filter-field">
+              <label class="field-label" for="auAction">Action Type</label>
+              <select id="auAction" class="select"><option value="">All actions</option></select>
+            </div>
+            <div class="filter-field">
+              <label class="field-label" for="auStatus">Status</label>
+              <select id="auStatus" class="select"><option value="">All statuses</option></select>
+            </div>
+            <div class="filter-field">
+              <label class="field-label" for="auUser">User</label>
+              <select id="auUser" class="select"><option value="">All users</option></select>
+            </div>
+          </div>
+          <div class="filter-actions">
+            <button type="button" class="btn btn--ghost" id="auReset">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-strip" id="auKpis"></div>
+
+      <div class="card panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Audit Log</h2>
+          <div class="panel__tools"><span class="chip" id="auRowChip">0 entries</span></div>
+        </div>
+        <div class="table-scroll">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Allocation Date</th>
+                <th>Action</th>
+                <th>Rev.</th>
+                <th>User</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Audit ID</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="auBody"></tbody>
+          </table>
+        </div>
+        <div class="truncation-note hidden" id="auTruncated"></div>
+        <div class="empty-state hidden" id="auEmpty">
+          <div class="empty-state__title">No audit entries found</div>
+          <div class="empty-state__text">Adjust the date range or filters and apply again.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal hidden" id="auditModal" role="dialog" aria-modal="true"
+         aria-labelledby="auditModalTitle">
+      <div class="modal__box modal__box--wide">
+        <h3 class="modal__title" id="auditModalTitle">Audit Entry</h3>
+        <div class="modal__body" id="auditModalBody"></div>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--ghost" id="auditModalClose">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const $ = (id) => container.querySelector(`#${id}`);
+
+  /** Server said no. Trust that over whatever the session claimed. */
+  function revokeAccess() {
+    isAdmin = false;
+    applyAccess();
   }
 
-  if (d.flow_diff.length) {
-    html += `<div class="detail-section">
-      <div class="detail-section__head"><h4 class="detail-section__title">Metal Flow Data</h4><span class="detail-section__note">${d.changed_flow_sectors} sector(s) changed</span></div>
-      ${flowDiffTable(d.flow_diff, d.totals)}
-    </div>`;
+  function applyAccess() {
+    $('auditGate').classList.toggle('hidden', isAdmin);
+    $('auditContent').classList.toggle('hidden', !isAdmin);
+    if (!isAdmin) closeModal();
   }
 
-  $('auditModalBody').innerHTML = html;
-}
+  // ------------------------------------------------------------ KPI cards
 
-async function openDetail(auditId) {
-  showOverlay('Loading the snapshot comparison…');
-  try {
-    const detail = await auditApi.getAuditEntryDetail(auditId);
-    hideOverlay();
-    renderDetail(detail);
+  function kpi(label, value, sub, modifier) {
+    return `
+      <div class="summary-stat summary-stat--${modifier}">
+        <span class="summary-stat__label">${label}</span>
+        <span class="summary-stat__value">${value}</span>
+        <span class="summary-stat__sub">${sub}</span>
+      </div>`;
+  }
+
+  /** Counts, not weights — plain integers, no decimals. */
+  function renderKpis(counts) {
+    $('auKpis').innerHTML = [
+      kpi('Entries', counts.total, 'matching the filters', 'navy'),
+      kpi('Successful', counts.success, 'saves and revisions', 'green'),
+      kpi('Blocked', counts.blocked, 'duplicates and refusals', 'amber'),
+      kpi('Failed', counts.failed, 'errors and rollbacks', 'rose'),
+      // Overlaps the three above — a REVISE is also a SUCCESS. Never summed in.
+      kpi('Revisions', counts.revisions, 'administrator edits', 'indigo'),
+    ].join('');
+  }
+
+  // ---------------------------------------------------------------- table
+
+  function renderRows(rows) {
+    const hasRows = rows.length > 0;
+    $('auEmpty').classList.toggle('hidden', hasRows);
+    $('auBody').innerHTML = rows
+      .map(
+        (r) => `
+        <tr>
+          <td class="date-cell">${escapeHtml(r.timestamp_display || DASH)}</td>
+          <td>${escapeHtml(r.allocation_date_display || DASH)}</td>
+          <td>${actionBadge(r.action_type)}</td>
+          <td>${revChip(r.revision_number)}</td>
+          <td>${escapeHtml(r.user_email)}</td>
+          <td class="reason-text">${escapeHtml(r.reason_preview || DASH)}</td>
+          <td>${statusDot(r.action_status)}</td>
+          <td><span class="audit-id">${escapeHtml(r.audit_id)}</span></td>
+          <td>${
+            r.has_snapshots
+              ? `<button type="button" class="btn--link js-audit-detail"
+                   data-audit-id="${escapeHtml(r.audit_id)}">View changes</button>`
+              : '<button type="button" class="btn--link" disabled>No snapshot</button>'
+          }</td>
+        </tr>`
+      )
+      .join('');
+  }
+
+  // --------------------------------------------------------- detail modal
+
+  function metaItem(label, value) {
+    return `
+      <div class="detail-meta__item">
+        <div class="detail-meta__label">${label}</div>
+        <div class="detail-meta__value">${value}</div>
+      </div>`;
+  }
+
+  function rowClass(entry) {
+    if (entry.only_after) return ' class="row-added"';
+    if (entry.only_before) return ' class="row-removed"';
+    return '';
+  }
+
+  function sectorCell(entry) {
+    const tag = entry.only_after
+      ? ' <span class="audit-badge audit-badge--save">added</span>'
+      : entry.only_before
+        ? ' <span class="audit-badge audit-badge--failed">removed</span>'
+        : '';
+    return `<td class="sector-col">${escapeHtml(entry.sector_name)}${tag}</td>`;
+  }
+
+  /**
+   * Nine columns: the sector, then a before/after pair per field. The
+   * data-label attributes are what the narrow-width card layout in audit.css
+   * prints as each cell's heading.
+   */
+  function allocationDiffTable(diff, beforeTotals, afterTotals) {
+    const head = ALLOCATION_FIELDS.map(
+      ([, label]) =>
+        `<th class="num group-before">${label} (before)</th>
+         <th class="num group-after">${label} (after)</th>`
+    ).join('');
+
+    const body = diff
+      .map((entry) => {
+        const cells = ALLOCATION_FIELDS.map(([name, label, kgField]) => {
+          const changed = entry.changed[name] ? ' is-changed' : '';
+          const before = entry.before ? entry.before[kgField] : null;
+          const after = entry.after ? entry.after[kgField] : null;
+          return `
+            <td class="num cell-before${changed}" data-label="${label} (before)">${weight(
+              before
+            )}</td>
+            <td class="num cell-after${changed}" data-label="${label} (after)">${weight(
+              after
+            )}</td>`;
+        }).join('');
+        return `<tr${rowClass(entry)}>${sectorCell(entry)}${cells}</tr>`;
+      })
+      .join('');
+
+    // Labelled "B → A rows" so a change in the number of sectors is visible.
+    const foot = ALLOCATION_FIELDS.map(
+      ([, label, kgField]) => `
+        <td class="num" data-label="${label} (before)">${weight(beforeTotals[kgField])}</td>
+        <td class="num" data-label="${label} (after)">${weight(afterTotals[kgField])}</td>`
+    ).join('');
+
+    return `
+      <div class="diff-wrap">
+        <table class="diff-table">
+          <thead><tr><th>Sector</th>${head}</tr></thead>
+          <tbody>${body}</tbody>
+          <tfoot>
+            <tr>
+              <td class="sector-col">Totals (${beforeTotals.row_count} &rarr; ${
+                afterTotals.row_count
+              } rows)</td>
+              ${foot}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="diff-legend">
+        <span><span class="legend-swatch" style="background:#fdf0d8;border:1px solid #f2ddb0"></span> Changed value</span>
+        <span><span class="legend-swatch" style="background:#e3f5ec"></span> Sector added</span>
+        <span><span class="legend-swatch" style="background:#fbe4e4"></span> Sector removed</span>
+      </div>`;
+  }
+
+  function flowDiffTable(diff, beforeTotals, afterTotals) {
+    const body = diff
+      .map((entry) => {
+        const changed = entry.changed.acquired ? ' is-changed' : '';
+        return `
+          <tr${rowClass(entry)}>
+            ${sectorCell(entry)}
+            <td class="num cell-before${changed}" data-label="Acquired (before)">${weight(
+              entry.before ? entry.before.acquired_kg : null
+            )}</td>
+            <td class="num cell-after${changed}" data-label="Acquired (after)">${weight(
+              entry.after ? entry.after.acquired_kg : null
+            )}</td>
+          </tr>`;
+      })
+      .join('');
+
+    return `
+      <div class="diff-wrap">
+        <table class="diff-table">
+          <thead>
+            <tr>
+              <th>Sector</th>
+              <th class="num group-before">Acquired (before)</th>
+              <th class="num group-after">Acquired (after)</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+          <tfoot>
+            <tr>
+              <td class="sector-col">Totals (${beforeTotals.row_count} &rarr; ${
+                afterTotals.row_count
+              } rows)</td>
+              <td class="num" data-label="Acquired (before)">${weight(
+                beforeTotals.acquired_kg
+              )}</td>
+              <td class="num" data-label="Acquired (after)">${weight(
+                afterTotals.acquired_kg
+              )}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+  }
+
+  function snapshotNote(d) {
+    if (!d.has_before && d.has_after) {
+      return `<div class="snapshot-note">This is an original save, so there is no earlier
+        state to compare against. The &ldquo;before&rdquo; columns are empty by design.</div>`;
+    }
+    if (!d.has_before && !d.has_after) {
+      return `<div class="snapshot-note">This entry records a blocked or failed action, so
+        no data snapshot was captured. Nothing in either master table was changed.</div>`;
+    }
+    return '';
+  }
+
+  function section(title, note, table) {
+    return `
+      <div class="detail-section">
+        <div class="detail-section__head">
+          <h4 class="detail-section__title">${title}</h4>
+          <span class="detail-section__note">${note}</span>
+        </div>
+        ${table}
+      </div>`;
+  }
+
+  function renderDetail(d) {
+    $('auditModalTitle').textContent = `Audit Entry — ${d.allocation_date_display || DASH}`;
+
+    const meta = [
+      metaItem('Action', actionBadge(d.action_type)),
+      metaItem('Status', statusDot(d.action_status)),
+      metaItem(
+        'Revision',
+        d.revision_number > 0 ? `#${d.revision_number}` : 'Original save'
+      ),
+      metaItem('User', escapeHtml(d.user_email)),
+      metaItem('Timestamp', escapeHtml(d.timestamp_display || DASH)),
+      metaItem('Audit ID', `<span class="audit-id">${escapeHtml(d.audit_id)}</span>`),
+      metaItem('Request ID', `<span class="audit-id">${escapeHtml(d.request_id || DASH)}</span>`),
+      metaItem('Sectors changed', `${d.changed_sectors} allocation · ${d.changed_flow_sectors} flow`),
+    ].join('');
+
+    // The FULL reason here, not the list's 140-character preview.
+    const reason = d.reason
+      ? `<div class="detail-reason">
+           <span class="detail-reason__label">Revision reason</span>${escapeHtml(d.reason)}
+         </div>`
+      : '';
+
+    const allocation = d.allocation_diff.length
+      ? section(
+          'Allocation Data',
+          `${d.changed_sectors} sector(s) changed`,
+          allocationDiffTable(
+            d.allocation_diff,
+            d.before_allocation_totals,
+            d.after_allocation_totals
+          )
+        )
+      : '';
+
+    const flow = d.flow_diff.length
+      ? section(
+          'Metal Flow Data',
+          `${d.changed_flow_sectors} sector(s) changed`,
+          flowDiffTable(d.flow_diff, d.before_flow_totals, d.after_flow_totals)
+        )
+      : '';
+
+    $('auditModalBody').innerHTML =
+      `<div class="detail-meta">${meta}</div>${reason}${snapshotNote(d)}${allocation}${flow}`;
+  }
+
+  function closeModal() {
+    $('auditModal').classList.add('hidden');
+  }
+
+  async function openDetail(auditId) {
+    $('auditModalTitle').textContent = 'Audit Entry';
+    $('auditModalBody').innerHTML =
+      '<div class="access-gate__text">Loading the snapshot comparison…</div>';
     $('auditModal').classList.remove('hidden');
-  } catch (err) {
-    hideOverlay();
-    toast('error', err.message || 'The audit entry could not be loaded.');
-    console.error(err);
+    try {
+      renderDetail(await getAuditEntry(auditId));
+    } catch (err) {
+      if (err instanceof AuthError) {
+        revokeAccess();
+        return;
+      }
+      $('auditModalBody').innerHTML =
+        `<div class="banner banner--error"><span>${escapeHtml(err.message)}</span></div>`;
+    }
+  }
+
+  // --------------------------------------------------------------- loading
+
+  function updateFilterCount() {
+    const active = ['Action', 'Status', 'User'].filter((id) => $(`au${id}`).value).length;
+    const dated =
+      options &&
+      ($('auFrom').value !== options.suggested_from || $('auTo').value !== options.suggested_to);
+    const n = active + (dated ? 1 : 0);
+    $('auFilterCount').textContent =
+      n === 0 ? 'No filters active' : `${n} filter${n > 1 ? 's' : ''} active`;
+  }
+
+  async function load() {
+    if (!isAdmin) return;
+    $('auRowChip').textContent = 'Loading…';
+    try {
+      const data = await getAuditLog({
+        date_from: $('auFrom').value,
+        date_to: $('auTo').value,
+        action_type: $('auAction').value,
+        status: $('auStatus').value,
+        user: $('auUser').value,
+      });
+
+      renderKpis(data.summary.counts);
+      renderRows(data.rows);
+      updateFilterCount();
+
+      $('auRowChip').textContent = `${data.summary.returned_count} entr${
+        data.summary.returned_count === 1 ? 'y' : 'ies'
+      }`;
+
+      // A note, not a pager — this page deliberately has no pagination.
+      $('auTruncated').classList.toggle('hidden', !data.summary.truncated);
+      if (data.summary.truncated) {
+        $('auTruncated').textContent =
+          `Showing the most recent ${data.summary.returned_count} of ` +
+          `${data.summary.record_count} matching entries. Narrow the date range or ` +
+          'filters to see older entries.';
+      }
+    } catch (err) {
+      if (err instanceof AuthError) {
+        revokeAccess();
+        return;
+      }
+      $('auRowChip').textContent = 'Error';
+      $('auBody').innerHTML =
+        `<tr><td colspan="9" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  function fillSelect(id, values) {
+    const select = $(id);
+    values.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value.replace(/_/g, ' ');
+      select.appendChild(option);
+    });
+  }
+
+  function seedDates() {
+    $('auFrom').value = options.suggested_from;
+    $('auTo').value = options.suggested_to;
+  }
+
+  async function loadOptions() {
+    try {
+      options = await getAuditFilterOptions();
+      fillSelect('auAction', options.actions);
+      fillSelect('auStatus', options.statuses);
+      fillSelect('auUser', options.users);
+      seedDates();
+    } catch (err) {
+      if (err instanceof AuthError) revokeAccess();
+      // Otherwise the log still loads; only the selects stay empty.
+    }
+  }
+
+  // ---------------------------------------------------------------- events
+
+  // Filters apply on change — there is no Apply button on any module.
+  ['auFrom', 'auTo', 'auAction', 'auStatus', 'auUser'].forEach((id) =>
+    $(id).addEventListener('change', load)
+  );
+
+  $('auReset').addEventListener('click', () => {
+    ['auAction', 'auStatus', 'auUser'].forEach((id) => {
+      $(id).value = '';
+    });
+    if (options) seedDates();
+    load();
+  });
+
+  // Delegated: one listener survives every re-render of the table body.
+  $('auBody').addEventListener('click', (event) => {
+    const button = event.target.closest('.js-audit-detail');
+    if (button) openDetail(button.dataset.auditId);
+  });
+
+  $('auditModalClose').addEventListener('click', closeModal);
+  $('auditModal').addEventListener('click', (event) => {
+    if (event.target === $('auditModal')) closeModal();
+  });
+  // Escape has to be caught on the document — focus may be anywhere. The
+  // listener removes itself once this view has been swapped out, so revisiting
+  // the tab does not stack one listener per visit.
+  function onEscape(event) {
+    if (!$('auditModal').isConnected) {
+      document.removeEventListener('keydown', onEscape);
+      return;
+    }
+    if (event.key === 'Escape') closeModal();
+  }
+  document.addEventListener('keydown', onEscape);
+
+  applyAccess();
+  if (isAdmin) {
+    loadOptions().then(load);
   }
 }
-
-function exportAuditLog() {
-  if (!A.rows.length) {
-    toast('warn', 'Load some audit entries before exporting.');
-    return;
-  }
-  const csvCell = (v) => {
-    const s = String(v === null || v === undefined ? '' : v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [['Timestamp', 'Allocation Date', 'Action', 'Revision', 'User', 'Reason', 'Status', 'Audit ID', 'Request ID'].map(csvCell).join(',')];
-  A.rows.forEach((r) => {
-    lines.push([r.timestamp_display, r.allocation_date_display, r.action_type, r.revision_number || '', r.user_email, r.reason_preview, r.status, r.audit_id, r.request_id].map(csvCell).join(','));
-  });
-  const csv = lines.join('\n');
-  $('exportText').value = csv;
-  $('exportBody').textContent = 'Copy the CSV below and paste it into a spreadsheet or text file.';
-  $('exportModal').classList.remove('hidden');
-}
-
-function resetFilters() {
-  const o = A.options || {};
-  $('auFrom').value = o.suggested_from || '';
-  $('auTo').value = o.suggested_to || '';
-  $('auAction').value = 'all';
-  $('auStatus').value = 'all';
-  $('auUser').value = 'all';
-  loadAuditLog();
-}
-
-export function bind() {
-  $('tabAudit').addEventListener('click', async () => {
-    await ensureOptions();
-    if (!A.loadedOnce) loadAuditLog();
-  });
-
-  $('auApply').addEventListener('click', loadAuditLog);
-  $('auReset').addEventListener('click', resetFilters);
-
-  $('auBody').addEventListener('click', (e) => {
-    const btn = e.target.closest ? e.target.closest('.js-audit-detail') : null;
-    if (!btn || btn.disabled) return;
-    openDetail(btn.getAttribute('data-audit-id'));
-  });
-
-  $('auditModalClose').addEventListener('click', () => $('auditModal').classList.add('hidden'));
-  $('auditModal').addEventListener('click', (e) => { if (e.target === $('auditModal')) $('auditModal').classList.add('hidden'); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('auditModal').classList.contains('hidden')) $('auditModal').classList.add('hidden');
-  });
-
-  checkAccess();
-}
-
-export { exportAuditLog };

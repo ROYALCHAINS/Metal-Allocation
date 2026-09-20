@@ -1,49 +1,56 @@
-"""
-schemas/audit.py — administrator-only audit viewer shapes.
-Legacy: AuditReportService.gs.
+"""schemas/audit.py — the administrator-only audit viewer.
+
+Never expose another account's scope or the administrator list (rule 10); these
+responses carry only what the log itself records.
+
+Snapshots are NOT in the list payload. They load on demand from the detail
+endpoint (page spec, rule 8) — a list can carry 500 rows and each snapshot is
+the full state of every sector.
 """
 
-from datetime import date as date_
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-class AuditFilters(BaseModel):
-    from_date: date_ | None = None
-    to_date: date_ | None = None
-    action_type: str = "all"
-    status: str = "all"
-    user: str = "all"
-    limit: int = 500
+class AuditFilterOptions(BaseModel):
+    """Built from the data, never a hard-coded list."""
 
-
-class AuditFilterOptionsOut(BaseModel):
     actions: list[str]
     statuses: list[str]
     users: list[str]
     entry_count: int
-    min_date: date_ | None
-    max_date: date_ | None
-    suggested_from: date_ | None
-    suggested_to: date_ | None
+    min_date: str | None
+    max_date: str | None
+    # A 90-day window counted back from the LATEST allocation date in the log,
+    # not from today, and clamped so it never precedes the earliest entry.
+    suggested_from: str
+    suggested_to: str
 
 
-class AuditLogRowOut(BaseModel):
+class AuditEntryRow(BaseModel):
     audit_id: str
-    allocation_date_key: date_ | None
-    allocation_date_display: str
+    # Nullable: a hard failure can be recorded before the date was resolved.
+    allocation_date: str | None
+    allocation_date_display: str | None
     action_type: str
+    action_status: str
     revision_number: int
     user_email: str
     timestamp_display: str
+    # Truncated to 140 characters server-side; the modal fetches the full text.
     reason_preview: str
-    request_id: str
-    status: str
+    request_id: str | None
     has_snapshots: bool
 
 
-class AuditCountsOut(BaseModel):
+class AuditCounts(BaseModel):
+    """Counts, not weights — plain integers.
+
+    total/success/blocked/failed are mutually exclusive and sum to total.
+    `revisions` OVERLAPS them and must not be added in.
+    """
+
     total: int
     success: int
     blocked: int
@@ -51,95 +58,75 @@ class AuditCountsOut(BaseModel):
     revisions: int
 
 
-class AuditLogSummaryOut(BaseModel):
+class AuditLogSummary(BaseModel):
     record_count: int
     returned_count: int
     truncated: bool
-    counts: AuditCountsOut
+    counts: AuditCounts
 
 
-class AuditLogOut(BaseModel):
-    rows: list[AuditLogRowOut]
-    summary: AuditLogSummaryOut
+class AuditLogResponse(BaseModel):
+    rows: list[AuditEntryRow]
+    summary: AuditLogSummary
 
 
-class AllocationSnapshotRowOut(BaseModel):
-    priority: str
-    sector: str
-    purity: str
-    previous_requirement: Decimal
-    today_required: Decimal
-    alloted: Decimal
-    balance: Decimal
+class DiffSide(BaseModel):
+    """One sector's state on one side of a revision, or absent entirely.
+
+    A field that is None renders as an em-dash, never as 0.000 — absence and
+    zero are different facts (rule 7).
+    """
+
+    sector_name: str
+    priority: str | None = None
+    purity: str | None = None
+    previous_requirement_kg: Decimal | None = None
+    today_required_kg: Decimal | None = None
+    alloted_kg: Decimal | None = None
+    balance_kg: Decimal | None = None
+    acquired_kg: Decimal | None = None
 
 
-class FlowSnapshotRowOut(BaseModel):
-    sector: str
-    acquired: Decimal
-
-
-class AllocationDiffRowOut(BaseModel):
-    sector: str
-    priority: str
-    before: AllocationSnapshotRowOut | None
-    after: AllocationSnapshotRowOut | None
+class DiffRow(BaseModel):
+    sector_name: str
+    before: DiffSide | None
+    after: DiffSide | None
+    # Per-field flags. Allocation carries four keys, flow carries "acquired".
     changed: dict[str, bool]
     any_change: bool
-    only_before: bool
-    only_after: bool
+    only_before: bool  # sector removed
+    only_after: bool  # sector added
 
 
-class FlowDiffRowOut(BaseModel):
-    sector: str
-    before: Decimal | None
-    after: Decimal | None
-    changed: bool
-    only_before: bool
-    only_after: bool
+class DiffTotals(BaseModel):
+    row_count: int
+    previous_requirement_kg: Decimal | None = None
+    today_required_kg: Decimal | None = None
+    alloted_kg: Decimal | None = None
+    balance_kg: Decimal | None = None
+    acquired_kg: Decimal | None = None
 
 
-class SnapshotTotalsOut(BaseModel):
-    previous_requirement: Decimal = Decimal("0")
-    today_required: Decimal = Decimal("0")
-    alloted: Decimal = Decimal("0")
-    balance: Decimal = Decimal("0")
-    acquired: Decimal = Decimal("0")
-    count: int = 0
-
-
-class AuditEntryTotalsOut(BaseModel):
-    before_allocation: SnapshotTotalsOut
-    after_allocation: SnapshotTotalsOut
-    before_flow: SnapshotTotalsOut
-    after_flow: SnapshotTotalsOut
-
-
-class AuditEntryDetailOut(BaseModel):
+class AuditEntryDetail(BaseModel):
     audit_id: str
-    allocation_date_key: date_ | None
-    allocation_date_display: str
+    allocation_date: str | None
+    allocation_date_display: str | None
     action_type: str
+    action_status: str
     revision_number: int
     user_email: str
     timestamp_display: str
-    reason: str
-    request_id: str
-    status: str
+    # The FULL reason here, not the list's 140-character preview.
+    reason: str | None
+    request_id: str | None
+
     has_before: bool
     has_after: bool
-    allocation_diff: list[AllocationDiffRowOut] = Field(default_factory=list)
-    flow_diff: list[FlowDiffRowOut] = Field(default_factory=list)
-    totals: AuditEntryTotalsOut
+    allocation_diff: list[DiffRow]
+    flow_diff: list[DiffRow]
+    before_allocation_totals: DiffTotals
+    after_allocation_totals: DiffTotals
+    before_flow_totals: DiffTotals
+    after_flow_totals: DiffTotals
     changed_sectors: int
     changed_flow_sectors: int
-
-
-class DateRevisionSummaryOut(BaseModel):
-    allocation_date: date_
-    revision_count: int
-    latest_revision_number: int
-    last_revised_by: str
-    last_revised_at: str
-    last_revision_reason: str
-    originally_saved_by: str
-    originally_saved_at: str

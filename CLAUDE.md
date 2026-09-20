@@ -181,7 +181,11 @@ breaks every comparison against historical data.
 - **Pydantic v2** — validation and serialisation
 - **SQLAlchemy 2.x** — ORM, with the modern `select()` style
 - **Alembic** — migrations
-- **PostgreSQL** — production database
+- **SQLite** — current database, resolved 2026-09-20. PostgreSQL was the original target
+  (see section 6, "Database" for why this changed and what it means for numeric
+  precision) — moving back to PostgreSQL later is expected to be a `DATABASE_URL` change,
+  not a rewrite, since nothing above the repository layer should know which database is
+  in use.
 - **pytest** + **httpx** — testing
 - **Decimal** (`decimal.Decimal`) — every weight, everywhere
 
@@ -194,7 +198,9 @@ required, say why and what it replaces before adding it.
 - Pandas for request-path logic (acceptable in offline migration scripts only)
 - ORM-level lazy loading in report queries; be explicit
 - Raw SQL outside `repository/`
-- Any Google API dependency in the new stack — the port exists to remove it
+- Any Google API dependency, including for login — the port exists to remove Google as a
+  dependency entirely. (Google OAuth login was tried and then explicitly replaced with
+  username/password on 2026-09-20 — see section 6, "Identity, scope and authorisation".)
 
 ---
 
@@ -238,9 +244,23 @@ npm run build
 
 ### Numeric precision
 
-1. **Never use `float` for weights.** Use `Decimal` in Python and `NUMERIC(12, 3)` in
-   PostgreSQL. This system reconciles physical gold; float drift is a real financial
-   error, not a rounding cosmetic.
+1. **Never use `float` for weights.** `Decimal` in Python, **`INTEGER` grams in the
+   database** — resolved 2026-09-20, see `schema.sql`'s design note. This system
+   reconciles physical gold; float drift is a real financial error, not a rounding
+   cosmetic.
+   - **Weights are stored as an integer number of grams**, with a `_g` column suffix so
+     the unit cannot be mistaken (`alloted_g`, `balance_g`, `acquired_g`, `value_g`).
+     Legacy worked in kilograms to exactly 3 decimals, and 3 decimals of a kilogram is
+     precisely 1 gram, so this is lossless *by construction* — it does not depend on
+     driver behaviour the way a `NUMERIC`-typed column on SQLite would, since SQLite has
+     no exact decimal type and `REAL` is binary floating point.
+   - **All conversion goes through `services/weight_service.py`** — `kg_to_grams()` /
+     `grams_to_kg()` — and nowhere else. That module refuses a `float` argument outright
+     rather than silently converting it. Proven by `tests/test_weight_service.py`
+     (exact round-trips, accumulation without drift, `ROUND_HALF_UP` at the third
+     decimal, float rejection).
+   - The `v_allocation_kg` / `v_flow_kg` views expose kilograms **for presentation only**.
+     Never compute on them.
 2. **Round to exactly 3 decimals** at every persistence boundary, using
    `ROUND_HALF_UP`. The legacy epsilon for comparisons is `0.0005` — half of the third
    decimal place. Use it for equality checks; never compare weights with `==`.
@@ -289,6 +309,21 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
    as authoritative — intersect it with the server-resolved scope.
 9. An entry in the deny list **always** overrides an admin grant.
 10. Never return the administrator list, or any other account's scope, to the client.
+11. **Authentication is username/password — resolved 2026-09-20, replacing an earlier
+    Google OAuth decision made the same day.** Legacy identity came free from
+    `Session.getActiveUser()` under Google Workspace; the new stack has no equivalent.
+    Google OAuth was implemented first, then explicitly removed in favor of a plain
+    email/password login, per instruction — no Google dependency of any kind remains
+    (section 4). Passwords are hashed (`bcrypt`), never stored or logged in plaintext, and
+    never compared with anything but a constant-time verify function.
+    - **Closed roster, no self-service signup, no signup page.** A user must already
+      exist in the `users` table — with a password hash already set — for login to
+      succeed. There is exactly one page: login. Accounts are provisioned out-of-band via
+      `create_user.py`, run by an administrator directly against the database, mirroring
+      legacy's model of hand-editing `Config.gs`'s `ADMIN_EMAILS`/`OPERATOR_PARTIES`.
+    - Role/party scope/deny status are still always resolved server-side from the `users`
+      table on every request (rule 8) — a successful password check proves *who*, never
+      *what they may do*.
 
 ### Concurrency and idempotency
 
@@ -316,16 +351,68 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
     label-matching logic. This is the one legacy behaviour that is intentionally *not*
     ported.
 17. Staging rows carry a record type of `ALLOCATION` or `FLOW`. Keep the two separate;
-    they are different sector sets with different sector counts.
+    they are different sector sets with different sector counts. **Note (2026-09-20):**
+    `flow_sector` holds the 21 allocation sector names, by explicit instruction — see
+    rule 17a. The two remain separate tables with separate meanings (demand vs supply);
+    the *names* overlap, and each flow row is mapped to a real party. The one-to-many
+    link through `party` is the only join between demand and supply — there is no
+    sector-to-sector mapping anywhere. See `SECTORS_EXPLAINED.md`.
+17a. **`schema.sql` + `DATABASE_OVERVIEW.md` are the schema reference** (supplied
+    2026-09-20). The SQLAlchemy models in `models/` and the Alembic migration `0002`
+    implement it. Three deliberate departures, each documented in the relevant model's
+    docstring rather than applied silently:
+    - `app_user.password_hash` — **added**. `schema.sql` predates the username/password
+      decision (rule 11) and has no password column, so login could not work without it.
+    - `metal_allocation_audit_log.action_type` — **widened** from six values to the nine
+      legacy actually writes. `schema.sql` lists only `AuditService.gs`'s `AUDIT_ACTIONS`
+      and omits `SUBMIT_REQUIREMENT`/`BLOCKED_RESUBMISSION`/`FAILED_SUBMISSION`, which
+      `StagingService.gs`'s `stagingAuditAction_()` emits to the same log. Left as-is,
+      every operator-submission audit write would be rejected by the CHECK once staging
+      is ported.
+    - `metal_allocation_audit_log.allocation_date` — **made NULLABLE** (migration
+      `0004`, 2026-09-20), with the format CHECK relaxed to `allocation_date IS NULL
+      OR <format test>` so a NULL is allowed while a malformed date is still refused.
+      `PROMPT_audit_log.md` rule 4 requires that an entry with no allocation date — a
+      hard failure recorded before the date could be resolved — is never excluded by
+      the date window. With `schema.sql`'s NOT NULL, no such row could be written at
+      all, so the rule was unreachable and the log could not record the very failures
+      it exists for. The date filter in `audit_repo` spares undated rows.
+    - `metal_requirement_staging.status` — **changed** from `'PENDING'` to legacy's
+      `STAGING_STATUS` vocabulary (`SUBMITTED`/`CONSUMED`, now CHECK-constrained).
+      `markStagingConsumed_()` only ever matches `SUBMITTED` rows, so `PENDING` rows
+      would be silently skipped at commit time.
+    - **`flow_sector` holds the same 21 sector names as `sector`, not the legacy list
+      of 8** — set 2026-09-20 by explicit instruction, briefly reverted on 2026-09-21
+      and then reinstated the same day. This overrides `DATABASE_OVERVIEW.md`'s and
+      `schema.sql`'s "these two lists are separate sets and must never be merged", and
+      `EXPECTED.FLOW_ROWS: 8` no longer describes this table. Each row maps to a real
+      party rather than to itself. The names overlap between the two tables; the rows
+      remain distinct records, one demand and one supply. See `seed/README.md`.
+      **The nine parties and their sector mapping are confirmed correct (2026-09-21),
+      `Factory` included.** Six of Factory's eight sectors name a brand
+      (`Fac Corp - Titan`, `ARK Orders`, …) — that brand is the customer the order is
+      for, not the owning party. Do not re-parent them onto the brand parties. Aqua,
+      ARK, IHG, Titan, Malabar and Aditya Birla are real parties that currently own no
+      sector; that is a data state, not a bug.
+    - `sector.priority` and `metal_master.priority_snapshot` — **`TEXT`, not `INTEGER`**
+      (migration `0003`). The sheet writes `Priority 1`…`Priority 6` and legacy keeps it
+      a string that users see unchanged: `ReportService.gs` uses it as the report
+      filter-dropdown label (line 204), as the "by priority" dashboard grouping key
+      (line 587), and in text search (line 107). It is stored verbatim — never parsed,
+      renumbered or reformatted. The `.badge--p1`…`.badge--p6` class is derived from the
+      label client-side by matching the first digit, exactly as legacy's
+      `priorityClass()` does.
 
 ### Known legacy inconsistencies
 
 Carry these forward as *questions*, not as ported behaviour:
 
-- `RANGES.ALLOCATION_SECTORS` is `A7:C25` (**19 rows**) while
-  `EXPECTED.ALLOCATION_ROWS` is **21**. `STRICT` is `false`, so the legacy app logs a
-  warning and uses whatever the sheet contains. The true sector count must be confirmed
-  during migration.
+- ~~`RANGES.ALLOCATION_SECTORS` is `A7:C25` (**19 rows**) while
+  `EXPECTED.ALLOCATION_ROWS` is **21**.~~ **RESOLVED 2026-09-20: the answer is 21.** The
+  supplied sheet data (`seed/sector names.csv`) contains exactly 21 allocation sectors, so
+  `EXPECTED.ALLOCATION_ROWS` was right and the `A7:C25` range comment — and `Index.html`'s
+  static "19 sectors" chip — are both stale. Priorities run 1-6, matching `Styles.html`'s
+  `.badge--p1`…`.badge--p6`. Do not reintroduce a 19 anywhere.
 - `Config.gs` declares `buildTag_Config_()` **twice**, returning `'5C'` and then
   `'5H'`. The second declaration wins. The version check is therefore weaker than it
   appears.
@@ -362,6 +449,23 @@ conflict should be raised rather than resolved silently.
 The open questions under *Known legacy inconsistencies* in section 6 are the canonical
 record of unresolved issues. Do not duplicate that list elsewhere.
 
+### Legacy source location and lifecycle
+
+The 20 `.gs`/`.html` files live in `legacy files/` at the project root (see that folder's
+`README.md`) — reference material only; nothing in the new application reads or runs them.
+They move through three stages:
+
+1. **Reference** — present in `legacy files/`, read before porting any behaviour they own.
+2. **Coexistence** — while a given legacy file's behaviour is being ported, both it and its
+   Python/JS equivalent exist at once. This is expected, not duplication to clean up early.
+3. **Retirement** — once a legacy file's ported equivalent is implemented **and** verified
+   against it, that specific legacy file may be deleted. Retire files one at a time as their
+   port is verified — never delete the whole folder preemptively, and never delete a file
+   whose port hasn't been verified yet.
+
+If a legacy file is missing from `legacy files/`, stop and ask for it — do not reconstruct
+it from git history or any other source.
+
 ### UI fidelity
 
 The visual design must be reproduced exactly.
@@ -378,3 +482,51 @@ Replacing it with a charting library would change the appearance and is out of s
 The three client modules — `Scripts.html`, `Reports.html`, `Audit.html` — share no
 state. Each is a self-contained IIFE binding to element IDs declared in `Index.html`,
 and they map cleanly onto three frontend route modules.
+
+## Session Logs
+
+Development history is recorded one folder per session under `sessions/`, not a single
+rolling log file:
+
+```
+sessions/
+├── 2026-09-19_rmas-legacy-review/
+│   └── session.md
+├── 2026-09-19_postgres-schema/
+│   └── session.md
+```
+
+* Folder naming: `YYYY-MM-DD_short-topic-slug`, so folders sort chronologically and are
+  identifiable at a glance.
+* One folder per session. Never split a single session's record across folders, and never
+  merge two sessions into one folder.
+* Each `session.md` covers: the session's goal, what happened (including implementation
+  detail and errors encountered), what was achieved, and what's left for future sessions —
+  using the template below.
+* Preserve every session folder exactly; never delete or rewrite development history.
+  Correcting a factual error in place is fine; removing an entry is not.
+* No line-count ceiling — each session gets its own file, so there's nothing to archive or
+  trim.
+
+### `session.md` template
+
+```markdown
+# Session: <topic>
+
+Date: YYYY-MM-DD
+
+Goal: <what was asked for>
+
+## What happened
+<chronological account, including implementation detail>
+
+## Errors / issues encountered
+<anything that went wrong and how it was handled>
+
+## Achievements
+<what was actually delivered>
+
+## Future things to implement / open questions
+<what's left, and any decisions still pending>
+```
+

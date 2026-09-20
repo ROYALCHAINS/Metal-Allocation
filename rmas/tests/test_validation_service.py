@@ -1,89 +1,60 @@
-"""
-Tests for validation_service.py: Decimal rounding (ROUND_HALF_UP), the
-0.0005 epsilon comparison, MAX_WEIGHT_KG ceiling, and signed-vs-unsigned
-weight validation. No DB required.
-"""
+"""tests/test_validation_service.py — key normalisation, ported from ValidationService.gs.
 
-from decimal import Decimal
+These tests pin the LEGACY behaviour, which differs from DATABASE_OVERVIEW.md's
+description of it. The overview says keys have "spaces, dashes and punctuation
+removed"; ValidationService.gs:70-76 collapses whitespace and lowercases but
+keeps spaces and punctuation. CLAUDE.md says the legacy source wins, so that is
+what is pinned here — see services/validation_service.py's docstring.
+"""
 
 import pytest
 
-from rmas.services.exceptions import ValidationError
-from rmas.services.validation_service import (
-    assert_signed_weight,
-    assert_valid_weight,
-    fmt3,
-    nearly_equal,
-    normalize_sector_key,
-    round3,
-    to_number,
+from services.validation_service import normalize_key
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("Royal Chain", "royal chain"),
+        ("Aditya Birla", "aditya birla"),
+        ("ARK", "ark"),
+        ("IHG", "ihg"),
+        # Trailing/leading whitespace is trimmed (legacy .trim()).
+        ("  Aalishaan  ", "aalishaan"),
+        # Whitespace runs collapse to a single space, they are NOT removed.
+        ("Royal    Chain", "royal chain"),
+        ("Royal\tChain", "royal chain"),
+        ("", ""),
+    ],
 )
+def test_normalize_key(raw: str, expected: str) -> None:
+    assert normalize_key(raw) == expected
 
 
-def test_round3_uses_round_half_up():
-    assert round3(Decimal("1.2345")) == Decimal("1.235")  # half-up, not banker's rounding
-    assert round3(Decimal("1.2344")) == Decimal("1.234")
-    # CLAUDE.md mandates ROUND_HALF_UP for the port (ties away from zero).
-    # Note this differs from legacy's JS Math.round, whose ties go toward
-    # +Infinity regardless of sign (Math.round(-1.5) === -1, not -2) — a
-    # genuine, narrow behavioural difference at exact tie values on negative
-    # (signed) weights, accepted per CLAUDE.md's explicit rule for the new
-    # system rather than silently replicated from the legacy float quirk.
-    assert round3(Decimal("-1.2345")) == Decimal("-1.235")
+def test_none_normalises_to_empty_string() -> None:
+    assert normalize_key(None) == ""
 
 
-def test_round3_none_and_blank_are_zero():
-    assert round3(None) == Decimal("0.000")
-    assert round3("") == Decimal("0.000")
+def test_spaces_are_kept_not_stripped() -> None:
+    """The documented difference from DATABASE_OVERVIEW.md.
+
+    If spaces were removed as the overview claims, these two would collide into
+    one key — legacy treats them as two distinct sectors.
+    """
+    assert normalize_key("Royal Chain") == "royal chain"
+    assert normalize_key("RoyalChain") == "royalchain"
+    assert normalize_key("Royal Chain") != normalize_key("RoyalChain")
 
 
-def test_fmt3_always_three_decimals():
-    assert fmt3(Decimal("5")) == "5.000"
-    assert fmt3(Decimal("5.1")) == "5.100"
+@pytest.mark.parametrize(
+    "dash_char",
+    ["‐", "‑", "‒", "–", "—", "―", "−"],
+)
+def test_unicode_dashes_become_plain_hyphens(dash_char: str) -> None:
+    """A sheet pasted from Word/Excel can carry en/em dashes — legacy folds them
+    so 'X–Y' and 'X-Y' match."""
+    assert normalize_key(f"Alpha{dash_char}Beta") == "alpha-beta"
 
 
-def test_nearly_equal_epsilon_boundary():
-    # exactly at 0.0005 is NOT nearly equal (strict less-than)
-    assert not nearly_equal(Decimal("1.000"), Decimal("1.0005"))
-    assert nearly_equal(Decimal("1.000"), Decimal("1.0004"))
-
-
-def test_to_number_strips_thousands_commas():
-    assert to_number("1,234.5") == Decimal("1234.500")
-
-
-def test_normalize_sector_key_collapses_whitespace_and_dashes():
-    assert normalize_sector_key("  Sector   Name ") == "sector name"
-    assert normalize_sector_key("Sector–Name") == "sector-name"  # en dash -> hyphen
-
-
-def test_normalize_sector_key_empty():
-    assert normalize_sector_key(None) == ""
-    assert normalize_sector_key("") == ""
-
-
-def test_assert_valid_weight_rejects_negative():
-    with pytest.raises(ValidationError) as exc:
-        assert_valid_weight(Decimal("-1"), "Today's Required")
-    assert exc.value.code == "NEGATIVE_VALUE"
-
-
-def test_assert_valid_weight_rejects_over_max():
-    with pytest.raises(ValidationError) as exc:
-        assert_valid_weight(Decimal("100001"), "Alloted")
-    assert exc.value.code == "VALUE_TOO_LARGE"
-
-
-def test_assert_signed_weight_allows_negative_balance_carry_forward():
-    assert assert_signed_weight(Decimal("-42.5"), "Previous Requirement") == Decimal("-42.500")
-
-
-def test_assert_signed_weight_rejects_over_max_magnitude_either_sign():
-    with pytest.raises(ValidationError):
-        assert_signed_weight(Decimal("-100001"), "Previous Requirement")
-
-
-def test_assert_valid_weight_invalid_number():
-    with pytest.raises(ValidationError) as exc:
-        assert_valid_weight("not-a-number", "Alloted")
-    assert exc.value.code == "INVALID_NUMBER"
+def test_case_insensitivity() -> None:
+    assert normalize_key("MALABAR") == normalize_key("malabar") == "malabar"

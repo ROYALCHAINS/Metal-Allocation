@@ -2,7 +2,10 @@
  * views/flowHistory.js — Metal Flow History.
  *
  * Metal Flow tracks SUPPLY — metal acquired — as against Allocation History,
- * which tracks demand. The two sector sets are different and are never merged.
+ * which tracks demand. The two sets are different and are never merged: Metal
+ * Flow is keyed by PARTY — the party metal arrives for — while the allocation
+ * side is keyed by order type. One party supplies many allocation sectors, so
+ * the column is labelled Party on every screen.
  *
  * Deliberately chart-only: no data table and no pager (page spec, rule 9).
  * Everything drawn comes from the server's analysis of EVERY matched record,
@@ -38,7 +41,7 @@ export function renderFlowHistoryView(container) {
   container.innerHTML = `
     ${renderFilterBar({
       prefix: 'mf',
-      sectorLabel: 'Metal Flow Sector',
+      sectorLabel: 'Party',
     })}
 
     <div class="summary-strip">
@@ -71,7 +74,7 @@ export function renderFlowHistoryView(container) {
         <span class="summary-stat__sub">kg</span>
       </div>
       <div class="summary-stat summary-stat--rose">
-        <span class="summary-stat__label">Sectors Covered</span>
+        <span class="summary-stat__label">Parties Covered</span>
         <span class="summary-stat__value" id="mfStatSectors">0</span>
         <span class="summary-stat__sub" id="mfStatSectorsSub">of 0</span>
       </div>
@@ -108,7 +111,7 @@ export function renderFlowHistoryView(container) {
 
       <div class="chart-card">
         <div class="chart-card__head">
-          <h3 class="chart-card__title">Total Acquired by Sector</h3>
+          <h3 class="chart-card__title">Total Acquired by Party</h3>
           <span class="chip" id="mfShareChip">0.000 kg total</span>
           <span class="chip" id="mfRowChip">0 records</span>
         </div>
@@ -249,7 +252,7 @@ export function renderFlowHistoryView(container) {
     }
   }
 
-  /** The select lists only the flow sectors the server's scope allows. */
+  /** The select lists only the parties the server's scope allows. */
   async function loadSectors() {
     try {
       const data = await getSectors();

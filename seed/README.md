@@ -8,7 +8,7 @@ Never hard-code any of these names in a `.py` or `.js` file.
 
 | File | Loads into | Source |
 |---|---|---|
-| `flow_sectors.csv` | `party`, `flow_sector` | **21 rows** — the allocation sector names, each mapped to a party (see below) |
+| `flow_sectors.csv` | `party`, `flow_sector` | **8 rows** — one per party, legacy range `I7:I14` (see below) |
 | `sector names.csv` | `party`, `sector` | Metal Generator sheet, allocation list (**21 rows**) |
 
 The loader accepts the allocation list as either `sector names.csv` (the sheet export's
@@ -37,25 +37,46 @@ The only rule the loader enforces is that NOT NULL columns cannot be blank — a
 priority or purity is refused rather than filled in. See `read_priority()` and
 `tests/test_seed_reference_data.py`.
 
-## `flow_sectors.csv` — 21 rows
+## `flow_sectors.csv` — 8 rows
 
-The same 21 sector names as the allocation list, each mapped to its **party** — taken
-from `sector names.csv`'s Party column, deliberately *not* mapped to themselves.
+**The Metal Flow table is keyed by PARTY, not by order type.** Each row is a party that
+metal physically arrives for, and maps to itself as its own party:
 
-> **This overrides the "never merge the two" rule** in `DATABASE_OVERVIEW.md` and
-> `schema.sql`, and `EXPECTED.FLOW_ROWS: 8` no longer describes this table. Set by
-> explicit instruction (2026-09-20), briefly reverted to the legacy 8 party names on
-> 2026-09-21 and reinstated the same day. See CLAUDE.md rule 17a.
+| Flow row | Party |
+|---|---|
+| Royal Chain | Royal Chain |
+| Aalishaan | Aalishaan |
+| Aqua | Aqua |
+| ARK | ARK |
+| IHG | IHG |
+| Titan | Titan |
+| Malabar | Malabar |
+| Aditya Birla | Aditya Birla |
 
-The rows remain distinct records from their allocation namesakes: one is demand, one is
-supply, and nothing joins them by name. The join between the two ledgers is the
-**party**, one-to-many.
+This matches legacy range `I7:I14` and `EXPECTED.FLOW_ROWS: 8`, and it is what
+`Config.gs` means by *"the Metal Flow table is keyed by party name rather than by order
+type, so an operator is mapped straight to the Metal Flow sector(s) they own."* The UI
+labels this column **Party** on every screen.
 
-**Superseded:** the table originally held the 8 Metal Flow names from legacy range
-`I7:I14` (Royal Chain, Aalishaan, Aqua, ARK, IHG, Titan, Malabar, Aditya Birla), each
-being its own party.
+The allocation list (`sector names.csv`) is untouched — 21 order-type sectors across
+Royal Chain, Factory and Aalishaan. The two lists are separate sets with no shared
+names, as `DATABASE_OVERVIEW.md` and `schema.sql` always said.
 
-`display_order` follows sheet row order.
+> **History:** between 2026-09-20 and 2026-09-21 this file held the 21 allocation sector
+> names instead. Set by instruction, reverted, and set back to the 8 party names on
+> 2026-09-21. The 21 names belong to the demand side only.
+
+### Known consequence: Factory has no supply row
+
+`Factory` owns 8 allocation sectors but is **not** one of the 8 Metal Flow parties, so no
+acquisition can be recorded against it and an operator scoped to Factory sees an empty
+Metal Flow table. Conversely Aqua, ARK, IHG, Titan, Malabar and Aditya Birla each have a
+flow row but own no allocation sector.
+
+Both are reported by `python seed_reference_data.py --report`. Loaded as supplied rather
+than guessed at.
+
+`display_order` follows the list order above.
 
 ## Pruning
 
@@ -75,19 +96,17 @@ silently.
 ## Parties
 
 Nine in total, from the union of both lists — matching legacy's
-`readPartyDefinitions_()`, which collected distinct parties across the allocation and
-flow sector rows:
+`readPartyDefinitions_()`:
 
-- **Royal Chain** — 10 allocation sectors, 10 flow sectors
-- **Factory** — 8 allocation sectors, 8 flow sectors
-- **Aalishaan** — 3 allocation sectors, 3 flow sectors
-- **Aqua, ARK, IHG, Titan, Malabar, Aditya Birla** — present in `party` but currently
-  own nothing on either side
+- **Royal Chain** — 10 allocation sectors, 1 flow row
+- **Factory** — 8 allocation sectors, **no flow row** (see above)
+- **Aalishaan** — 3 allocation sectors, 1 flow row
+- **Aqua, ARK, IHG, Titan, Malabar, Aditya Birla** — 1 flow row each, no allocation
+  sectors
 
-Note those six brand names also appear *inside* Factory's sector names
-(`Fac Corp - Titan`, `Fac Customer/Stock Orders - Aqua`, `ARK Orders`, …). Those rows
-correctly carry `Factory` as their party, **not** the brand — confirmed 2026-09-21. See
-"Resolved — `Factory` is a real party" at the end of this file.
+`Factory` is correct and stays (confirmed 2026-09-21). Six of its sectors name a brand
+(`Fac Corp - Titan`, `ARK Orders`, …) — that brand is the customer the order is for, not
+the owning business unit, so those rows are **not** to be re-parented.
 
 Run `python seed_reference_data.py --report` to print the current mapping.
 

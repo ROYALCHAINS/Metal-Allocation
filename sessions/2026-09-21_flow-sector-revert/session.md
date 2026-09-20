@@ -1,4 +1,4 @@
-# Session: Metal Flow sector list — changed, then reverted
+# Session: Metal Flow sector list — changed, reverted, then reinstated
 
 Date: 2026-09-21
 
@@ -56,6 +56,29 @@ taken *after* migration `0004`, so the database is still at `0004` with
 `allocation_date` nullable, the relaxed CHECK, both append-only triggers and all
 35 audit rows intact.
 
+### Reinstated
+
+Later in the same session the instruction came back: *"why am i still seeing Sector
+names in the Metal Flow frontend table"*, followed by *"change the column name of Metal
+flow table from sector name to party name and replace the sector names to party names"*.
+
+Since party names had now been asked for twice, this was treated as superseding the
+"do not change the flow_sector database sector names" line from the interrupted message,
+and the change was rebuilt:
+
+- `seed/flow_sectors.csv` back to the 8 party rows, pruned and reseeded
+- `metal_flow_master` repopulated across the 8 parties, again carrying each **date's
+  total forward exactly** — 867.972 kg over 18 dates, preserved to the gram, so no
+  Dashboard figure moved
+- `views/allocation.js` — the Metal Flow panel's column reads **Party**, its chip counts
+  parties, and the empty-state message matches
+- `views/flowHistory.js` — "Parties Covered", "Total Acquired by Party", and the filter
+  dropdown labelled Party
+- The Allocation table is untouched: still 21 order-type sectors, still headed "Sector"
+
+`CLAUDE.md` rules 17/17a and `seed/README.md` rewritten to describe the 8-row state as
+the correct one, noting it round-tripped.
+
 ## Errors / issues encountered
 
 1. **Deleted the rows I still needed a number from.** The reflow script captured
@@ -74,9 +97,9 @@ taken *after* migration `0004`, so the database is still at `0004` with
 
 ## Achievements
 
-- The change was delivered end to end, and then reverted end to end with no
-  data loss: all 378 original flow rows, all 21 flow sectors and all 9 parties
-  are back, byte-identical to the pre-change database.
+- The change was delivered, reverted, and reinstated end to end with no data loss at
+  any point. Each cycle preserved every date's acquired total to the gram, so no
+  Dashboard or report figure moved despite the underlying breakdown changing twice.
 - 224 tests pass, unchanged before and after.
 - Backing up first is what made this cheap. Worth keeping as the habit for any
   reference-data change: the repo IS under git, but `rmas.db` is excluded by

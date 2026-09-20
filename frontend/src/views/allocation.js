@@ -107,13 +107,13 @@ export function renderAllocationView(container, user) {
       <div class="card panel panel--flow">
         <div class="panel__head">
           <h2 class="panel__title">Metal Flow</h2>
-          <div class="panel__tools"><span class="chip" id="flowRowCount">0 sectors</span></div>
+          <div class="panel__tools"><span class="chip" id="flowRowCount">0 parties</span></div>
         </div>
         <div class="table-scroll">
           <table class="data-table flow-table">
             <thead>
               <tr>
-                <th class="col-sector">Sector</th>
+                <th class="col-sector">Party</th>
                 <th class="num">Previous Acquired</th>
                 <th class="num">Today&rsquo;s Acquired</th>
               </tr>
@@ -193,7 +193,7 @@ export function renderAllocationView(container, user) {
           .map(
             (row, i) => `
           <tr data-index="${i}">
-            <td class="cell-sector" data-label="Sector">
+            <td class="cell-sector" data-label="Party">
               <span class="sector-name">${escapeHtml(row.sector_name)}</span>
             </td>
             <td class="num" data-label="Previous Acquired">
@@ -209,12 +209,14 @@ export function renderAllocationView(container, user) {
       // The two sector sets are scoped independently through party, so one can
       // be empty while the other is not. Say which, rather than leaving a table
       // showing nothing but a zero totals row (legacy Scripts.html).
-      : `<tr><td colspan="3" class="empty-cell">No Metal Flow sectors are mapped to your
-           party, so there is nothing to enter here. Ask the administrator to set the
-           Party for the Metal Flow sectors.</td></tr>`;
+      : `<tr><td colspan="3" class="empty-cell">Your party has no Metal Flow row, so
+           there is nothing to acquire against here. Ask the administrator to add your
+           party to the Metal Flow list.</td></tr>`;
 
     $('allocRowCount').textContent = `${model.allocations.length} sectors`;
-    $('flowRowCount').textContent = `${model.metal_flow.length} sectors`;
+    $('flowRowCount').textContent = `${model.metal_flow.length} part${
+      model.metal_flow.length === 1 ? 'y' : 'ies'
+    }`;
 
     container.querySelectorAll('.cell-input').forEach((input) => {
       input.addEventListener('input', recalc);

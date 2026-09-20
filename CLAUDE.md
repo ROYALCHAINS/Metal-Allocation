@@ -351,12 +351,13 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
     label-matching logic. This is the one legacy behaviour that is intentionally *not*
     ported.
 17. Staging rows carry a record type of `ALLOCATION` or `FLOW`. Keep the two separate;
-    they are different sector sets with different sector counts. **Note (2026-09-20):**
-    `flow_sector` holds the 21 allocation sector names, by explicit instruction — see
-    rule 17a. The two remain separate tables with separate meanings (demand vs supply);
-    the *names* overlap, and each flow row is mapped to a real party. The one-to-many
-    link through `party` is the only join between demand and supply — there is no
-    sector-to-sector mapping anywhere. See `SECTORS_EXPLAINED.md`.
+    they are different sets with different counts and no shared names. **The Metal Flow
+    table is keyed by PARTY, not by order type** — its 8 rows are the parties metal
+    arrives for (legacy range `I7:I14`, `EXPECTED.FLOW_ROWS: 8`), each mapping to itself
+    as its own party. **The UI labels that column "Party" on every screen.** One party
+    supplies many allocation sectors; that one-to-many link through `party` is the only
+    join between demand and supply, and there is no sector-to-sector mapping anywhere.
+    See `SECTORS_EXPLAINED.md`.
 17a. **`schema.sql` + `DATABASE_OVERVIEW.md` are the schema reference** (supplied
     2026-09-20). The SQLAlchemy models in `models/` and the Alembic migration `0002`
     implement it. Three deliberate departures, each documented in the relevant model's
@@ -381,19 +382,17 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
       `STAGING_STATUS` vocabulary (`SUBMITTED`/`CONSUMED`, now CHECK-constrained).
       `markStagingConsumed_()` only ever matches `SUBMITTED` rows, so `PENDING` rows
       would be silently skipped at commit time.
-    - **`flow_sector` holds the same 21 sector names as `sector`, not the legacy list
-      of 8** — set 2026-09-20 by explicit instruction, briefly reverted on 2026-09-21
-      and then reinstated the same day. This overrides `DATABASE_OVERVIEW.md`'s and
-      `schema.sql`'s "these two lists are separate sets and must never be merged", and
-      `EXPECTED.FLOW_ROWS: 8` no longer describes this table. Each row maps to a real
-      party rather than to itself. The names overlap between the two tables; the rows
-      remain distinct records, one demand and one supply. See `seed/README.md`.
-      **The nine parties and their sector mapping are confirmed correct (2026-09-21),
-      `Factory` included.** Six of Factory's eight sectors name a brand
-      (`Fac Corp - Titan`, `ARK Orders`, …) — that brand is the customer the order is
-      for, not the owning party. Do not re-parent them onto the brand parties. Aqua,
-      ARK, IHG, Titan, Malabar and Aditya Birla are real parties that currently own no
-      sector; that is a data state, not a bug.
+    - **`flow_sector` holds the legacy 8 party names** (Royal Chain, Aalishaan, Aqua,
+      ARK, IHG, Titan, Malabar, Aditya Birla), each its own party — so
+      `DATABASE_OVERVIEW.md`, `schema.sql` and `EXPECTED.FLOW_ROWS: 8` describe this
+      table correctly and this is **not** a departure. Recorded here only because it
+      round-tripped: between 2026-09-20 and 2026-09-21 it briefly held the 21 allocation
+      sector names instead, and that was reversed. The allocation list is untouched at
+      21. **Known consequence:** `Factory` owns 8 allocation sectors but is not one of
+      the 8 flow parties, so it has demand with no supply row, while the six brand
+      parties have supply with no demand. Both are reported by
+      `python seed_reference_data.py --report`; `Factory` is confirmed correct and its
+      sectors are not to be re-parented onto the brand parties.
     - `sector.priority` and `metal_master.priority_snapshot` — **`TEXT`, not `INTEGER`**
       (migration `0003`). The sheet writes `Priority 1`…`Priority 6` and legacy keeps it
       a string that users see unchanged: `ReportService.gs` uses it as the report

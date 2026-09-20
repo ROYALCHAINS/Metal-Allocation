@@ -2,54 +2,42 @@
 config.py
 Royal Metal Allocation System — Python port
 
-Single source of deployment configuration (env-backed). Business rule toggles
-live in rules/business_rules.py, not here — this file only holds settings
-that differ per environment (DB, timezone, auth). No secrets are hard-coded.
-
-Ports: Config.gs's SPREADSHEET_ID / TIMEZONE_FALLBACK / LOCK_TIMEOUT_MS /
-REQUEST_ID_TTL_SECONDS / APP_NAME / APP_VERSION.
+Typed application settings, loaded from environment variables / .env.
+Ports the non-rule parts of Config.gs (app name/version, timezone). Business
+rule toggles live in rules/business_rules.py, not here (CLAUDE.md section 2,
+"Where things belong").
 """
 
-from functools import lru_cache
-from decimal import Decimal
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Resolved relative to this file, not the process's working directory, so
+# both are found whether the app is launched as `python main.py`,
+# `uvicorn main:app` from inside rmas/, or from the project root.
+_RMAS_DIR = Path(__file__).resolve().parent
+_ENV_FILE = _RMAS_DIR / ".env"
+_DEFAULT_SQLITE_URL = f"sqlite:///{(_RMAS_DIR / 'rmas.db').as_posix()}"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     app_name: str = "Royal Metal Allocation System"
-    app_version: str = "1.0.0-py"  # legacy Apps Script build was '5H'; this is the new lineage
-
-    database_url: str = "postgresql+psycopg://rmas:rmas@localhost:5432/rmas"
-
-    # Legacy TIMEZONE_FALLBACK. The application is single-timezone; every date
-    # key is produced and compared in this zone.
+    app_version: str = "5H"
     app_timezone: str = "Asia/Kolkata"
 
-    # Google OAuth / Workspace SSO. The frontend obtains a Google ID token;
-    # the backend verifies its signature and audience against this client id.
-    google_oauth_client_id: str = ""
-    # Restrict accepted identities to a Workspace domain, e.g. "royalchains.com".
-    # Blank means any verified Google identity is accepted (role/scope lookup
-    # in the database still decides what they can do).
-    google_workspace_hosted_domain: str = ""
+    # SQLite for now (CLAUDE.md section 4, resolved 2026-09-20) — file lives
+    # at rmas/rmas.db, gitignored. Override via .env to point elsewhere; a
+    # move back to PostgreSQL is meant to be just a DATABASE_URL change.
+    database_url: str = _DEFAULT_SQLITE_URL
 
-    # Legacy LOCK_TIMEOUT_MS (30000) — Postgres advisory lock wait, in seconds.
-    save_lock_timeout_seconds: float = 30.0
-
-    # Legacy REQUEST_ID_TTL_SECONDS — idempotency window for request_id replay.
-    request_id_ttl_seconds: int = 900
-
-    # Legacy DECIMALS / EPSILON / MAX_WEIGHT_KG. Kept here (not in
-    # business_rules.py) because they are numeric-precision constants, not
-    # business policy toggles — see rules/business_rules.py docstring.
-    weight_decimals: int = 3
-    weight_epsilon: Decimal = Decimal("0.0005")
-    max_weight_kg: Decimal = Decimal("100000")
+    # Signs the session cookie (itsdangerous, via Starlette's SessionMiddleware).
+    # The cookie carries only a signed user id — role/scope are still resolved
+    # server-side from the `users` table on every request (rule 8). This
+    # default is INSECURE and only for local dev — a real deployment must set
+    # SESSION_SECRET_KEY to a long random value via .env.
+    session_secret_key: str = "dev-insecure-change-me"
 
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
+settings = Settings()

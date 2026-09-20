@@ -1,10 +1,18 @@
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-settings
-sqlalchemy>=2.0
-alembic
-psycopg[binary]
-google-auth
-pytest
-httpx
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+SQLAlchemy==2.0.54
+alembic==1.20.0
+python-dotenv==1.2.3
+itsdangerous==2.2.0
+bcrypt==5.0.0
+
+# Testing
+pytest==9.1.1
+httpx==0.28.1
+
+# SQLite is stdlib (no driver needed). psycopg[binary] was removed when the
+# database moved to SQLite (CLAUDE.md section 4, 2026-09-20) — re-add it
+# when/if the project moves back to PostgreSQL.

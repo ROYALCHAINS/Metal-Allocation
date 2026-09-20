@@ -2,9 +2,9 @@
 database.py
 Royal Metal Allocation System — Python port
 
-Engine, session factory and declarative base. Nothing here is business logic;
-services and repositories depend on get_db, never on Session directly at
-import time.
+SQLAlchemy engine, session factory, declarative base, and the get_db()
+dependency every router/service uses to obtain a session. No models and no
+business logic here (CLAUDE.md section 2, "Where things belong").
 """
 
 from collections.abc import Generator
@@ -12,21 +12,22 @@ from collections.abc import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from rmas.config import get_settings
+from config import settings
 
-settings = get_settings()
+# check_same_thread=False: FastAPI runs sync routes in a threadpool, so a
+# request's DB session may be used from a different thread than the one
+# that created it. Only meaningful for SQLite — ignored by other dialects.
+_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
-
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+engine = create_engine(settings.database_url, pool_pre_ping=True, connect_args=_connect_args)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Base(DeclarativeBase):
-    """Declarative base for every ORM model in rmas/models/."""
+    pass
 
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency yielding a request-scoped session."""
     db = SessionLocal()
     try:
         yield db

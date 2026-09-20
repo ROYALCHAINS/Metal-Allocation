@@ -1,13 +1,15 @@
+/* Ported verbatim from legacy files/StylesReports.html — additions only;
+   tokens.css (Styles.html) must load FIRST and owns the design tokens.
+   Load order is load-bearing: tokens -> reports -> audit (CLAUDE.md section 7). */
 /* RMAS-StylesReports-7G - chart value labels, paired lower cards */
 /* ==================================================================
-   Royal Metal Allocation System - reports.css
-   Ported from StylesReports.html. Additions only — tokens.css loads
-   first and owns the design tokens.
+   Royal Metal Allocation System - StylesReports.html
+   Additions only. Styles.html loads first and owns the design tokens.
    ================================================================== */
 
 /* ------------------------------ NAV TABS --------------------------
-   Continues the deep navy header from the reference: gold underline
-   on the active tab, monospace count pills. */
+   Continues the deep navy header from Metal_Allocation_UI.txt: gold
+   underline on the active tab, monospace count pills. */
 .view-nav{
   background:var(--navy-900);border-top:1px solid rgba(255,255,255,.08);
   position:sticky;top:0;z-index:55;

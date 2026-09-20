@@ -1,0 +1,134 @@
+/* app.css — layout only, for pages with no legacy equivalent (login, and
+   this dashboard placeholder pending the ReportService port). Built
+   entirely from the ported tokens in tokens.css; does not redefine or
+   override any legacy class from the visual contract. */
+
+.center-page {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.center-page .card {
+  width: 100%;
+  max-width: 420px;
+}
+.access-gate__action {
+  margin-top: 18px;
+}
+.access-gate__form {
+  text-align: left;
+}
+
+.dashboard-welcome {
+  max-width: 720px;
+  margin: 32px auto;
+  padding: 0 16px;
+}
+.welcome-card {
+  padding: 20px;
+}
+.welcome-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.welcome-card__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--slate-900);
+}
+.welcome-card__subtitle {
+  margin: 4px 0 0;
+  color: var(--grey-600);
+  font-size: 13px;
+}
+.welcome-card__note {
+  margin-top: 16px;
+  color: var(--grey-600);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   Additions for the filter card and the Analysis Dashboard KPI cards.
+
+   StylesReports.html defines .summary-stat with a slate accent bar and only
+   four modifiers (--green, --navy, --amber, --closing), of which --green and
+   --navy colour the VALUE only, not the bar. The screenshots show six distinct
+   accent colours, so the missing bar colours are added here rather than editing
+   the ported contract file. Colours come from the tokens in tokens.css.
+   -------------------------------------------------------------------------- */
+
+.summary-stat--indigo::after { background: var(--indigo-600); }
+.summary-stat--green::after  { background: var(--green-600); }
+.summary-stat--navy::after   { background: var(--navy-900); }
+.summary-stat--emerald::after{ background: var(--emerald-400); }
+.summary-stat--emerald .summary-stat__value { color: var(--slate-900); }
+.summary-stat--rose::after   { background: var(--red-600); }
+
+/* Filter card, with the Apply button removed — filters apply on change. The
+   action column now holds Reset alone, so the width it used to need goes to
+   the selects instead, and the gap opens up so the date pair, Quick Range,
+   Sector and Balance Status read as four separate groups rather than one run
+   of controls. reports.css owns the twelve-column grid itself. */
+.filter-bar__grid { gap: 16px 20px; }
+.filter-group--selects,
+.filter-group--selects-3 { grid-column: span 4; }
+.filter-actions { grid-column: span 2; }
+
+/* The Audit Log carries three selects and keeps reports.css's wider action
+   column, so its selects group takes the remaining five columns: 4 + 5 + 3. */
+.filter-bar__grid--audit .filter-group--selects-3 { grid-column: span 5; }
+
+/* reports.css already sizes .legend-swatch; inside the audit diff legend it
+   sits inline beside its label rather than in a flex row, so it needs these
+   two extras and nothing more. */
+.diff-legend .legend-swatch { vertical-align: -1px; margin-right: 4px; }
+
+/* Headline figures above a plot, so the totals are readable without adding up
+   the bars. Sits inside .chart-card__body, above the SVG. */
+.chart-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  align-items: baseline;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--grey-100);
+}
+.chart-totals__item { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.chart-totals__item .legend-swatch { align-self: center; flex: 0 0 12px; }
+.chart-totals__label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--grey-600);
+}
+.chart-totals__value {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--slate-900);
+  letter-spacing: -.01em;
+}
+
+/* Heatmap grid on Metal Flow History — inline SVG, as in legacy. reports.css
+   already sizes and colours .heat-cell-text / .heat-col-label / .heat-row-label;
+   these are the additions it does not cover. The cell figure is monospace so
+   the columns of digits align, and the SVG keeps its intrinsic width inside
+   .heat-scroll rather than being squeezed to the card.
+
+   Type is a step up from reports.css's 9.5px: at that size the kilogram
+   figures inside the cells were legible only by leaning in, and this grid is
+   the whole point of the card. The cell geometry in views/flowHistory.js is
+   sized to match — change both together or the text will not fit. */
+.heat-cell-text { font-family: var(--mono); font-size: 11.5px; }
+.heat-col-label { font-size: 11.5px; font-weight: 500; }
+.heat-row-label { font-size: 13px; font-weight: 500; }
+.heat-scroll > .chart-svg { width: auto; max-width: none; }

@@ -1,12 +1,19 @@
 /* RMAS-Styles-7H - brand logo image */
 /* ==================================================================
-   Royal Metal Allocation System - tokens.css
-   Ported from Styles.html. LOADS FIRST — owns every design token.
-   This is the visual contract (CLAUDE.md section 7): class names and
-   tokens survive unchanged from the legacy build. Direct implementation
-   of the Tailwind CDN reference; every token it uses is reproduced here
-   as plain CSS on the existing class names, so no compiler runs in the
-   browser. Inter for text, JetBrains Mono for every figure.
+   Royal Metal Allocation System - Styles.html
+
+   This is a direct implementation of Metal_Allocation_UI.txt. The
+   reference is a Tailwind CDN page; every token it uses is reproduced
+   here as plain CSS on the existing class names, so no markup or
+   JavaScript had to change and no 300 KB compiler runs in the browser.
+
+   Palette is taken verbatim from the reference tailwind.config plus the
+   Tailwind default slate / emerald / amber / blue / rose / purple stops
+   it references. Inter for text, JetBrains Mono for every figure.
+
+   Ported verbatim from legacy files/Styles.html — CLAUDE.md section 7,
+   "UI fidelity": this is the visual contract and must survive unchanged.
+   Google Fonts <link> tags live in index.html's <head>, not here.
    ================================================================== */
 
 :root {
@@ -522,8 +529,8 @@ button{font-family:inherit;}
 }
 .action-bar__info{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0;}
 /* The long status sentence stays hidden, as requested earlier. It is
-   still written to by views/allocation.js and read back to explain a
-   disabled Save button in a toast, so the node is hidden rather than removed. */
+   still written to by Scripts.html and read back to explain a disabled
+   Save button in a toast, so the node is hidden rather than removed. */
 .action-bar__status{display:none !important;}
 .action-bar__remaining{
   display:flex;align-items:center;gap:8px;

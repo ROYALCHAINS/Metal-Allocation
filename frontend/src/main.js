@@ -1,39 +1,35 @@
 /**
- * main.js — application entry point.
- *
- * Legacy had no equivalent: Code.gs's doGet() rendered the page already
- * signed in, since Apps Script authenticates the user implicitly via the
- * Google Workspace session. This is a real static web app served
- * separately from the API, so it must sign in explicitly before any view
- * can call the backend — see api/auth.js.
+ * main.js — app entry point. Decides login vs. dashboard from session state;
+ * no client-side router yet since there is only one authenticated view.
  */
 
-import { renderSignInButton, whenSignedIn } from './api/auth.js';
-import { bindModalChrome, bindTabClicks, hideOverlay, showOverlay } from './components/shell.js';
-import * as allocationView from './views/allocation.js';
-import * as reportsView from './views/reports.js';
-import * as dashboardView from './views/dashboard.js';
-import * as auditView from './views/audit.js';
+import { getCurrentUser } from './api/auth.js';
+import { renderLogin } from './views/login.js';
+import { renderDashboard } from './views/dashboard.js';
 
-async function start() {
-  bindModalChrome();
-  bindTabClicks();
+const app = document.getElementById('app');
 
-  showOverlay('Sign in to continue…');
-  const signInContainer = document.createElement('div');
-  signInContainer.id = 'googleSignIn';
-  signInContainer.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(11,22,35,.85);';
-  document.body.appendChild(signInContainer);
-  renderSignInButton(signInContainer);
-
-  await whenSignedIn();
-  signInContainer.remove();
-  hideOverlay();
-
-  allocationView.init();
-  reportsView.bind();
-  dashboardView.bind();
-  auditView.bind();
+function showDashboard(user) {
+  renderDashboard(app, user);
 }
 
-document.addEventListener('DOMContentLoaded', start);
+function showLogin() {
+  renderLogin(app, showDashboard);
+}
+
+async function bootstrap() {
+  let user = null;
+  try {
+    user = await getCurrentUser();
+  } catch (err) {
+    console.error('Failed to check session', err);
+  }
+
+  if (user) {
+    showDashboard(user);
+  } else {
+    showLogin();
+  }
+}
+
+bootstrap();

@@ -1,0 +1,22 @@
+Priority,Party,Sector,Purity
+Priority 1,Royal Chain,RC Customer Orders,Any
+Priority 1,Aalishaan,AJ Customer Orders,Any
+Priority 1,Royal Chain,Dxb Customer Orders,Any
+Priority 1,Factory,Fac Customer/Stock Orders - Aqua,Any
+Priority 1,Factory,Fac Customer/Stock Orders - IHG,Any
+Priority 1,Factory,ARK Orders,Any
+Priority 2,Factory,Fac Corp - Titan,Any
+Priority 2,Factory,Fac Corp - Aditya Birla,Any
+Priority 2,Factory,Fac Corp - Malabar,Any
+Priority 2,Royal Chain,RC Corp - Reliance,Any
+Priority 2,Royal Chain,RC Corp - Orra,Any
+Priority 2,Royal Chain,RC Corp - Others,Any
+Priority 2,Royal Chain,RC Wholesale Stock Orders,Any
+Priority 2,Aalishaan,AJ Wholesale Stock Orders,Any
+Priority 3,Factory,Factory Rotation,Any
+Priority 4,Factory,NPD,Any
+Priority 4,Royal Chain,DXB Stock Orders,Any
+Priority 5,Royal Chain,RC IMS - Machine Chain,Any
+Priority 5,Royal Chain,RC IMS - Others,Any
+Priority 6,Royal Chain,All Other Stock Orders,Any
+Priority 6,Aalishaan,Aalishaan Stock Orders,Any

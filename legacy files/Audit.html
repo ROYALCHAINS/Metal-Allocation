@@ -1,0 +1,558 @@
+<script>
+/* ==================================================================
+   Royal Metal Allocation System — Audit.html (Phase 3)
+   Administrator-only audit log viewer and snapshot comparison.
+   Read-only. Independent of Scripts.html and Reports.html.
+   ================================================================== */
+(function () {
+  'use strict';
+
+  var A = {
+    isAdmin: false,
+    accessChecked: false,
+    options: null,
+    loadedOnce: false,
+    busy: false,
+    rows: [],
+    lastRevisionDate: ''
+  };
+
+  /* ------------------------- shared helpers ----------------------- */
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function round3(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return 0;
+    return Math.round((v + Number.EPSILON) * 1000) / 1000;
+  }
+
+  function fmt3(n) { return round3(n).toFixed(3); }
+
+  /** Renders a possibly-absent numeric snapshot value. */
+  function fmtOrDash(n) {
+    return (n === null || n === undefined) ? '\u2014' : fmt3(n);
+  }
+
+  function shiftIso(iso, days) {
+    var p = String(iso).split('-');
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12, 0, 0);
+    d.setDate(d.getDate() + days);
+    var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+    var dd = String(d.getDate()); if (dd.length < 2) dd = '0' + dd;
+    return d.getFullYear() + '-' + m + '-' + dd;
+  }
+
+  function showOverlay(text) {
+    $('overlayText').textContent = text || 'Loading\u2026';
+    $('overlay').classList.remove('hidden');
+  }
+  function hideOverlay() { $('overlay').classList.add('hidden'); }
+
+  function toast(type, message) {
+    var stack = $('toastStack');
+    var el = document.createElement('div');
+    el.className = 'toast toast--' + (type || 'info');
+    el.textContent = message;
+    stack.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); },
+      type === 'error' ? 9000 : 5000);
+  }
+
+  function actionBadge(action) {
+    var map = {
+      SAVE: 'save', REVISE: 'revise', BLOCKED_DUPLICATE: 'blocked',
+      FAILED_SAVE: 'failed', FAILED_REVISION: 'failed', UNAUTHORIZED_REVISION: 'unauth'
+    };
+    var cls = map[action] || 'other';
+    var label = String(action || '\u2014').replace(/_/g, ' ');
+    return '<span class="audit-badge audit-badge--' + cls + '">' + esc(label) + '</span>';
+  }
+
+  function statusDot(status) {
+    var cls = status === 'SUCCESS' ? 'success' : (status === 'BLOCKED' ? 'blocked' : 'failed');
+    return '<span class="status-dot status-dot--' + cls + '">' + esc(status || '\u2014') + '</span>';
+  }
+
+  /* --------------------------- access gate ------------------------ */
+
+  function checkAccess(next) {
+    if (A.accessChecked) { next(); return; }
+    google.script.run
+      .withSuccessHandler(function (res) {
+        A.accessChecked = true;
+        A.isAdmin = !!(res && res.ok && res.data && res.data.isAdmin);
+        applyAccess();
+        next();
+      })
+      .withFailureHandler(function (err) {
+        A.accessChecked = true;
+        A.isAdmin = false;
+        applyAccess();
+        console.error(err);
+        next();
+      })
+      .getCurrentUserAccess();
+  }
+
+  function applyAccess() {
+    $('tabAudit').classList.toggle('hidden', !A.isAdmin);
+    $('auditGate').classList.toggle('hidden', A.isAdmin);
+    $('auditContent').classList.toggle('hidden', !A.isAdmin);
+
+    // Role is a separate indicator from Date Status. Date Status still reports
+    // whether the selected date can be saved; Role reports who you are.
+    var pill = $('hdrRole');
+    if (!pill) return;
+    if (A.isAdmin) {
+      pill.className = 'role-pill role-pill--admin';
+      pill.textContent = 'Admin';
+    } else {
+      pill.className = 'role-pill role-pill--user';
+      pill.textContent = 'User';
+    }
+  }
+
+  /* ------------------------- filter options ----------------------- */
+
+  function ensureOptions(next) {
+    if (A.options) { next(); return; }
+    showOverlay('Loading audit filters\u2026');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        hideOverlay();
+        if (!res || !res.ok) {
+          if (res && res.code === 'NOT_AUTHORIZED') {
+            A.isAdmin = false;
+            applyAccess();
+            return;
+          }
+          toast('error', (res && res.message) || 'Audit filters could not be loaded.');
+          return;
+        }
+        A.options = res.data;
+        populateFilters();
+        next();
+      })
+      .withFailureHandler(function (err) {
+        hideOverlay();
+        toast('error', 'Audit filters could not be loaded. Check the connection and retry.');
+        console.error(err);
+      })
+      .getAuditFilterOptions();
+  }
+
+  function fillSelect(id, values, allLabel) {
+    var el = $(id);
+    if (!el) return;
+    var html = '<option value="all">' + esc(allLabel) + '</option>';
+    values.forEach(function (v) {
+      var label = String(v).replace(/_/g, ' ');
+      html += '<option value="' + esc(v) + '">' + esc(label) + '</option>';
+    });
+    el.innerHTML = html;
+  }
+
+  function populateFilters() {
+    var o = A.options;
+    fillSelect('auAction', o.actions, 'All actions');
+    fillSelect('auStatus', o.statuses, 'All statuses');
+    fillSelect('auUser', o.users, 'All users');
+    $('auFrom').value = o.suggestedFrom || '';
+    $('auTo').value = o.suggestedTo || '';
+    if (o.entryCount) {
+      $('tabCountAudit').textContent = o.entryCount;
+      $('tabCountAudit').classList.remove('hidden');
+    }
+  }
+
+  function applyQuickRange(days, btn) {
+    var group = btn.parentNode.querySelectorAll('.quick-range__btn');
+    for (var i = 0; i < group.length; i++) group[i].classList.remove('is-active');
+    btn.classList.add('is-active');
+
+    var o = A.options || {};
+    if (Number(days) === 0) {
+      $('auFrom').value = o.minDate || '';
+      $('auTo').value = o.maxDate || '';
+    } else {
+      var to = o.maxDate || '';
+      if (!to) return;
+      var from = shiftIso(to, -(Number(days) - 1));
+      if (o.minDate && from < o.minDate) from = o.minDate;
+      $('auFrom').value = from;
+      $('auTo').value = to;
+    }
+  }
+
+  /* ---------------------------- audit list ------------------------ */
+
+  /**
+   * Counts how many controls are away from their default, for the
+   * "Applied: N filters active" readout in the toolbar header. Dates are
+   * counted as one filter together, since they are always set as a pair.
+   */
+  function updateAuditFilterCount() {
+    var node = $('auFilterCount');
+    if (!node) return;
+    var n = 0;
+    if ($('auFrom').value || $('auTo').value) n++;
+    ['auAction', 'auStatus', 'auUser'].forEach(function (id) {
+      if ($(id).value && $(id).value !== 'all') n++;
+    });
+    node.textContent = n === 0 ? 'No filters active'
+      : (n + ' filter' + (n === 1 ? '' : 's') + ' active');
+  }
+
+  function auditFilters() {
+    updateAuditFilterCount();
+    return {
+      fromDate: $('auFrom').value,
+      toDate: $('auTo').value,
+      actionType: $('auAction').value,
+      status: $('auStatus').value,
+      user: $('auUser').value,
+      search: ''            // the Search field was removed
+    };
+  }
+
+  function loadAuditLog() {
+    if (A.busy || !A.isAdmin) return;
+    A.busy = true;
+    showOverlay('Loading the audit log\u2026');
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        A.busy = false;
+        hideOverlay();
+        if (!res || !res.ok) {
+          if (res && res.code === 'NOT_AUTHORIZED') {
+            A.isAdmin = false;
+            applyAccess();
+            return;
+          }
+          toast('error', (res && res.message) || 'The audit log could not be loaded.');
+          return;
+        }
+        A.loadedOnce = true;
+        A.rows = res.data.rows;
+        renderAuditLog(res.data);
+      })
+      .withFailureHandler(function (err) {
+        A.busy = false;
+        hideOverlay();
+        toast('error', 'The audit log could not be loaded. Check the connection and retry.');
+        console.error(err);
+      })
+      .getAuditLog(auditFilters());
+  }
+
+  function renderAuditLog(data) {
+    var s = data.summary;
+    $('auStatTotal').textContent = s.counts.total;
+    $('auStatSuccess').textContent = s.counts.success;
+    $('auStatBlocked').textContent = s.counts.blocked;
+    $('auStatFailed').textContent = s.counts.failed;
+    $('auStatRevisions').textContent = s.counts.revisions;
+    $('auRowChip').textContent = s.returnedCount + ' entries';
+
+    var html = data.rows.map(function (r) {
+      return '<tr>' +
+        '<td class="date-cell" data-label="Timestamp">' + esc(r.timestampDisplay || '\u2014') + '</td>' +
+        '<td data-label="Allocation Date">' + esc(r.allocationDateDisplay) + '</td>' +
+        '<td data-label="Action">' + actionBadge(r.actionType) + '</td>' +
+        '<td data-label="Revision">' + (r.revisionNumber > 0
+          ? '<span class="rev-chip">#' + r.revisionNumber + '</span>'
+          : '<span class="rev-chip rev-chip--original">Original</span>') + '</td>' +
+        '<td data-label="User">' + esc(r.userEmail || '\u2014') + '</td>' +
+        '<td data-label="Reason"><span class="reason-text">' +
+          esc(r.reasonPreview || '\u2014') + '</span></td>' +
+        '<td data-label="Status">' + statusDot(r.status) + '</td>' +
+        '<td data-label="Audit ID"><span class="audit-id">' + esc(r.auditId) + '</span></td>' +
+        '<td data-label="Detail"><button type="button" class="btn--link js-audit-detail" ' +
+          'data-audit-id="' + esc(r.auditId) + '"' + (r.hasSnapshots ? '' : ' disabled') + '>' +
+          (r.hasSnapshots ? 'View changes' : 'No snapshot') + '</button></td>' +
+      '</tr>';
+    }).join('');
+
+    $('auBody').innerHTML = html;
+    $('auEmpty').classList.toggle('hidden', data.rows.length > 0);
+    $('auTable').classList.toggle('hidden', data.rows.length === 0);
+
+    var trunc = $('auTruncated');
+    if (s.truncated) {
+      trunc.textContent = 'Showing the most recent ' + s.returnedCount + ' of ' + s.recordCount +
+        ' matching entries. Narrow the date range or filters to see older entries.';
+      trunc.classList.remove('hidden');
+    } else {
+      trunc.classList.add('hidden');
+    }
+  }
+
+  /* --------------------------- detail modal ----------------------- */
+
+  function openDetail(auditId) {
+    showOverlay('Loading the snapshot comparison\u2026');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        hideOverlay();
+        if (!res || !res.ok) {
+          toast('error', (res && res.message) || 'The audit entry could not be loaded.');
+          return;
+        }
+        renderDetail(res.data);
+        $('auditModal').classList.remove('hidden');
+      })
+      .withFailureHandler(function (err) {
+        hideOverlay();
+        toast('error', 'The audit entry could not be loaded.');
+        console.error(err);
+      })
+      .getAuditEntryDetail(auditId);
+  }
+
+  function metaItem(label, value) {
+    return '<div class="detail-meta__item">' +
+      '<div class="detail-meta__label">' + esc(label) + '</div>' +
+      '<div class="detail-meta__value">' + value + '</div>' +
+    '</div>';
+  }
+
+  function allocationDiffTable(diff, totals) {
+    if (!diff.length) return '';
+
+    var body = diff.map(function (d) {
+      var rowCls = d.onlyAfter ? ' class="row-added"' : (d.onlyBefore ? ' class="row-removed"' : '');
+      function cell(field, side, isBefore) {
+        var value = side ? side[field] : null;
+        var cls = (isBefore ? 'cell-before' : 'cell-after') + ' num' +
+          (d.changed[field] ? ' is-changed' : '');
+        var label = (isBefore ? 'Before ' : 'After ') + fieldLabel(field);
+        return '<td class="' + cls + '" data-label="' + esc(label) + '">' + fmtOrDash(value) + '</td>';
+      }
+      return '<tr' + rowCls + '>' +
+        '<td class="sector-col" data-label="Sector">' + esc(d.sector) +
+          (d.onlyAfter ? ' <span class="audit-badge audit-badge--save">added</span>' : '') +
+          (d.onlyBefore ? ' <span class="audit-badge audit-badge--failed">removed</span>' : '') +
+        '</td>' +
+        cell('previousRequirement', d.before, true) +
+        cell('previousRequirement', d.after, false) +
+        cell('todayRequired', d.before, true) +
+        cell('todayRequired', d.after, false) +
+        cell('alloted', d.before, true) +
+        cell('alloted', d.after, false) +
+        cell('balance', d.before, true) +
+        cell('balance', d.after, false) +
+      '</tr>';
+    }).join('');
+
+    var b = totals.beforeAllocation, a = totals.afterAllocation;
+
+    return '<div class="diff-wrap"><table class="diff-table">' +
+      '<thead><tr>' +
+        '<th>Sector</th>' +
+        '<th class="num group-before">Prev. Req. (before)</th><th class="num group-after">Prev. Req. (after)</th>' +
+        '<th class="num group-before">Required (before)</th><th class="num group-after">Required (after)</th>' +
+        '<th class="num group-before">Alloted (before)</th><th class="num group-after">Alloted (after)</th>' +
+        '<th class="num group-before">Balance (before)</th><th class="num group-after">Balance (after)</th>' +
+      '</tr></thead>' +
+      '<tbody>' + body + '</tbody>' +
+      '<tfoot><tr>' +
+        '<td data-label="Totals">Totals (' + b.count + ' \u2192 ' + a.count + ' rows)</td>' +
+        '<td class="num" data-label="Prev. Req. (before)">' + fmt3(b.previousRequirement) + '</td>' +
+        '<td class="num" data-label="Prev. Req. (after)">' + fmt3(a.previousRequirement) + '</td>' +
+        '<td class="num" data-label="Required (before)">' + fmt3(b.todayRequired) + '</td>' +
+        '<td class="num" data-label="Required (after)">' + fmt3(a.todayRequired) + '</td>' +
+        '<td class="num" data-label="Alloted (before)">' + fmt3(b.alloted) + '</td>' +
+        '<td class="num" data-label="Alloted (after)">' + fmt3(a.alloted) + '</td>' +
+        '<td class="num" data-label="Balance (before)">' + fmt3(b.balance) + '</td>' +
+        '<td class="num" data-label="Balance (after)">' + fmt3(a.balance) + '</td>' +
+      '</tr></tfoot>' +
+    '</table></div>';
+  }
+
+  function fieldLabel(field) {
+    var map = {
+      previousRequirement: 'Prev. Req.',
+      todayRequired: 'Required',
+      alloted: 'Alloted',
+      balance: 'Balance'
+    };
+    return map[field] || field;
+  }
+
+  function flowDiffTable(diff, totals) {
+    if (!diff.length) return '';
+
+    var body = diff.map(function (d) {
+      var rowCls = d.onlyAfter ? ' class="row-added"' : (d.onlyBefore ? ' class="row-removed"' : '');
+      var changedCls = d.changed ? ' is-changed' : '';
+      return '<tr' + rowCls + '>' +
+        '<td class="sector-col" data-label="Sector">' + esc(d.sector) + '</td>' +
+        '<td class="cell-before num' + changedCls + '" data-label="Acquired (before)">' + fmtOrDash(d.before) + '</td>' +
+        '<td class="cell-after num' + changedCls + '" data-label="Acquired (after)">' + fmtOrDash(d.after) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    return '<div class="diff-wrap"><table class="diff-table">' +
+      '<thead><tr><th>Sector</th>' +
+        '<th class="num group-before">Acquired (before)</th>' +
+        '<th class="num group-after">Acquired (after)</th></tr></thead>' +
+      '<tbody>' + body + '</tbody>' +
+      '<tfoot><tr>' +
+        '<td data-label="Totals">Totals</td>' +
+        '<td class="num" data-label="Acquired (before)">' + fmt3(totals.beforeFlow.acquired) + '</td>' +
+        '<td class="num" data-label="Acquired (after)">' + fmt3(totals.afterFlow.acquired) + '</td>' +
+      '</tr></tfoot>' +
+    '</table></div>';
+  }
+
+  function renderDetail(d) {
+    $('auditModalTitle').textContent = 'Audit Entry \u2014 ' + d.allocationDateDisplay;
+
+    var html = '<div class="detail-meta">' +
+      metaItem('Action', actionBadge(d.actionType)) +
+      metaItem('Status', statusDot(d.status)) +
+      metaItem('Revision', d.revisionNumber > 0 ? '#' + d.revisionNumber : 'Original save') +
+      metaItem('User', esc(d.userEmail || '\u2014')) +
+      metaItem('Timestamp', esc(d.timestampDisplay || '\u2014')) +
+      metaItem('Audit ID', '<span class="audit-id">' + esc(d.auditId) + '</span>') +
+      metaItem('Request ID', '<span class="audit-id">' + esc(d.requestId || '\u2014') + '</span>') +
+      metaItem('Sectors changed', d.changedSectors + ' allocation \u00B7 ' + d.changedFlowSectors + ' flow') +
+    '</div>';
+
+    if (d.reason) {
+      html += '<div class="detail-reason">' +
+        '<span class="detail-reason__label">Reason</span>' + esc(d.reason) + '</div>';
+    }
+
+    if (!d.hasBefore && d.hasAfter) {
+      html += '<div class="snapshot-note">This is an original save, so there is no earlier state to ' +
+        'compare against. The "before" columns are empty by design.</div>';
+    } else if (!d.hasBefore && !d.hasAfter) {
+      html += '<div class="snapshot-note">This entry records a blocked or failed action, so no data ' +
+        'snapshot was captured. Nothing in either master sheet was changed.</div>';
+    }
+
+    if (d.allocationDiff.length) {
+      html += '<div class="detail-section">' +
+        '<div class="detail-section__head">' +
+          '<h4 class="detail-section__title">Allocation Data</h4>' +
+          '<span class="detail-section__note">' + d.changedSectors + ' sector(s) changed</span>' +
+        '</div>' +
+        allocationDiffTable(d.allocationDiff, d.totals) +
+        '<div class="diff-legend">' +
+          '<span class="legend-key"><span class="legend-swatch" style="background:#fdf0d8;border:1px solid #f2ddb0"></span>Changed value</span>' +
+          '<span class="legend-key"><span class="legend-swatch" style="background:#e3f5ec"></span>Sector added</span>' +
+          '<span class="legend-key"><span class="legend-swatch" style="background:#fbe4e4"></span>Sector removed</span>' +
+        '</div>' +
+      '</div>';
+    }
+
+    if (d.flowDiff.length) {
+      html += '<div class="detail-section">' +
+        '<div class="detail-section__head">' +
+          '<h4 class="detail-section__title">Metal Flow Data</h4>' +
+          '<span class="detail-section__note">' + d.changedFlowSectors + ' sector(s) changed</span>' +
+        '</div>' +
+        flowDiffTable(d.flowDiff, d.totals) +
+      '</div>';
+    }
+
+    $('auditModalBody').innerHTML = html;
+  }
+
+  /* ---------------------------- CSV export ------------------------ */
+
+  function csvCell(v) {
+    var s = String(v === null || v === undefined ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function exportAuditLog() {
+    if (!A.rows.length) { toast('warn', 'Load some audit entries before exporting.'); return; }
+
+    var lines = [['Timestamp', 'Allocation Date', 'Action', 'Revision', 'User',
+      'Reason', 'Status', 'Audit ID', 'Request ID'].map(csvCell).join(',')];
+
+    A.rows.forEach(function (r) {
+      lines.push([r.timestampDisplay, r.allocationDateDisplay, r.actionType,
+        r.revisionNumber || '', r.userEmail, r.reasonPreview, r.status,
+        r.auditId, r.requestId].map(csvCell).join(','));
+    });
+
+    var csv = lines.join('\n');
+    var downloaded = false;
+    try {
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'audit-log.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      downloaded = true;
+    } catch (e) { downloaded = false; }
+
+    $('exportText').value = csv;
+    $('exportBody').textContent = downloaded
+      ? 'The download was started. If your browser blocked it, copy the CSV below instead.'
+      : 'Copy the CSV below and paste it into a spreadsheet or text file.';
+    $('exportModal').classList.remove('hidden');
+    if (downloaded) toast('success', 'Audit CSV export prepared.');
+  }
+
+  /* ------------------------------ events -------------------------- */
+
+  function resetFilters() {
+    var o = A.options || {};
+    $('auFrom').value = o.suggestedFrom || '';
+    $('auTo').value = o.suggestedTo || '';
+    $('auAction').value = 'all';
+    $('auStatus').value = 'all';
+    $('auUser').value = 'all';
+    loadAuditLog();
+  }
+
+  function bind() {
+    // The audit tab shares the nav handler in Reports.html for view switching;
+    // this only adds the data load.
+    $('tabAudit').addEventListener('click', function () {
+      ensureOptions(function () { if (!A.loadedOnce) loadAuditLog(); });
+    });
+
+    $('auApply').addEventListener('click', loadAuditLog);
+    $('auReset').addEventListener('click', resetFilters);
+
+    $('auBody').addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('.js-audit-detail') : null;
+      if (!btn || btn.disabled) return;
+      openDetail(btn.getAttribute('data-audit-id'));
+    });
+
+    $('auditModalClose').addEventListener('click', function () {
+      $('auditModal').classList.add('hidden');
+    });
+    $('auditModal').addEventListener('click', function (e) {
+      if (e.target === this) this.classList.add('hidden');
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !$('auditModal').classList.contains('hidden')) {
+        $('auditModal').classList.add('hidden');
+      }
+    });
+
+    checkAccess(function () { /* nothing further to set up */ });
+  }
+
+  document.addEventListener('DOMContentLoaded', bind);
+})();
+</script>

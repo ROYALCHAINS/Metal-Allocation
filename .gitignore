@@ -1,29 +1,26 @@
 # Python
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.pyc
+*.pyo
+.metal/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.metal/
-.venv/
-venv/
+*.egg-info/
+.coverage
+htmlcov/
 
 # Env
 .env
-.env.*
-!.env.example
+
+# SQLite database (CLAUDE.md section 4, resolved 2026-09-20)
+*.db
+*.db-journal
 
 # Node / frontend
 node_modules/
-frontend/dist/
-frontend/.vite/
+dist/
 
-# OS / editor
+# OS
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-
-# Alembic (keep versions, ignore local sqlite if ever used for quick tests)
-*.sqlite3

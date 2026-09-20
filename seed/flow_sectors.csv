@@ -1,0 +1,22 @@
+display_order,sector_name,party_name
+1,RC Customer Orders,Royal Chain
+2,AJ Customer Orders,Aalishaan
+3,Dxb Customer Orders,Royal Chain
+4,Fac Customer/Stock Orders - Aqua,Factory
+5,Fac Customer/Stock Orders - IHG,Factory
+6,ARK Orders,Factory
+7,Fac Corp - Titan,Factory
+8,Fac Corp - Aditya Birla,Factory
+9,Fac Corp - Malabar,Factory
+10,RC Corp - Reliance,Royal Chain
+11,RC Corp - Orra,Royal Chain
+12,RC Corp - Others,Royal Chain
+13,RC Wholesale Stock Orders,Royal Chain
+14,AJ Wholesale Stock Orders,Aalishaan
+15,Factory Rotation,Factory
+16,NPD,Factory
+17,DXB Stock Orders,Royal Chain
+18,RC IMS - Machine Chain,Royal Chain
+19,RC IMS - Others,Royal Chain
+20,All Other Stock Orders,Royal Chain
+21,Aalishaan Stock Orders,Aalishaan

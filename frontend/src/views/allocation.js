@@ -1,686 +1,356 @@
 /**
- * views/allocation.js — Daily Allocation screen. Ported from Scripts.html.
- * Every rule here is re-validated on the server (services/allocation_service.py,
- * services/staging_service.py); this module is presentation + client-side
- * convenience checks only.
+ * views/allocation.js — the Daily Allocation screen.
+ *
+ * Markup and class names are ported from legacy Index.html's #view-daily and
+ * Scripts.html's renderAllocationRows()/recalc(): the same control bar, the six
+ * KPI cards in the same order, the same table columns, and the same
+ * .alloc-table/.flow-table/.kpi/.totals-row classes so the ported CSS applies
+ * unchanged (CLAUDE.md section 7, UI fidelity).
+ *
+ * ONE ROLE-CONDITIONAL VIEW, not two (resolved 2026-09-20): operators get the
+ * Today's Required / Today's Acquired inputs, administrators additionally get
+ * Alloted and the Save button — mirroring legacy's applyRoleChrome().
+ *
+ * All arithmetic is done in INTEGER GRAMS via lib/format.js, never in
+ * kilograms with JS floats.
  */
 
-import * as allocationsApi from '../api/allocations.js';
-import * as stagingApi from '../api/staging.js';
-import { esc, fmt3, fmt1, num, todayIso } from '../lib/format.js';
-import {
-  $, closeModal, hideOverlay, openModal, setBanner, setBarStatus, setHeaderStatus, showOverlay, toast,
-} from '../components/shell.js';
+import { getAllocationForDate, newRequestId, saveAllocation } from '../api/allocations.js';
+import { escapeHtml } from '../components/appHeader.js';
+import { balanceClass, fmt3, formatGrams, toGrams } from '../lib/format.js';
 
-const EPS = 0.0005;
+const KPI_ORDER = [
+  'Previous Requirement',
+  "Today's Required",
+  "Today's Acquired",
+  'Actual Alloted',
+  'Remaining to Allocate',
+  'Closing Balance',
+];
 
-const STATE = {
-  busy: false,
-  readOnly: true,
-  canRevise: false,
-  isAdmin: false,
-  email: '',
-  displayName: '',
-  role: 'ADMIN',
-  isOperator: false,
-  canEditRequired: true,
-  canEditAcquired: true,
-  canEditAlloted: true,
-  showGlobalTotals: true,
-  dateKey: '',
-  model: null,
-  baseline: null,
-};
-
-function uuid() {
-  return `REQ-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 10)}-${Math.random().toString(36).substring(2, 6)}`;
+function todayIso() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
-/* --------------------------- rendering -------------------------- */
+export function renderAllocationView(container, user) {
+  const isAdmin = user.role === 'admin';
+  let model = null;
+  let selectedDate = todayIso();
 
-function renderAllocationRows(rows) {
-  const lockRequired = !STATE.canEditRequired;
-  const lockAlloted = !STATE.canEditAlloted;
+  container.innerHTML = `
+    <div class="card control-bar" aria-label="Allocation date selection">
+      <div class="control-bar__field">
+        <label class="field-label" for="allocationDate">Allocation Date</label>
+        <input type="date" id="allocationDate" class="input input--date" value="${selectedDate}">
+      </div>
+      <div class="control-bar__field">
+        <span class="field-label">Previous Source Date</span>
+        <div class="readonly-box" id="prevSourceDateBox">&mdash;</div>
+      </div>
+      <div class="control-bar__field control-bar__field--grow">
+        <span class="field-label">Date Status</span>
+        <div class="readonly-box" id="dateStatusBox">Loading&hellip;</div>
+      </div>
+      <div class="control-bar__actions">
+        <button type="button" class="btn btn--ghost" id="btnReloadDate">Refresh</button>
+      </div>
+    </div>
 
-  if (!rows.length) {
-    $('allocBody').innerHTML =
-      '<tr><td colspan="6" class="empty-cell">No allocation sectors are mapped to your party. ' +
-      'Ask the administrator to check the Party column in Metal Generator.</td></tr>';
-    $('allocRowCount').textContent = '0 sectors';
-    return;
-  }
-  const html = rows.map((r, i) => `
-    <tr class="alloc-row" data-index="${i}" data-sector="${esc(r.sector)}">
-      <td class="cell-sector" data-label="Sector">
-        <span class="sector-name">${esc(r.sector)}</span>
-        <button type="button" class="row-toggle" data-toggle="${i}" aria-label="Toggle details">&minus;</button>
-      </td>
-      <td class="cell-purity m-detail" data-label="Purity">${esc(r.purity || 'Any')}</td>
-      <td class="num m-detail" data-label="Previous Requirement">
-        <span class="readonly-value" id="prevReq-${i}">${fmt3(r.previous_requirement)}</span>
-      </td>
-      <td class="num m-detail" data-label="Today’s Required">
-        <input type="number" inputmode="decimal" step="0.001" min="0" class="cell-input js-required" id="req-${i}"
-          data-index="${i}" value="${r.today_required ? fmt3(r.today_required) : ''}" placeholder="0.000"
-          aria-label="Today’s Required Weight for ${esc(r.sector)}" ${lockRequired ? 'disabled' : ''}>
-        <div class="inline-error hidden" id="reqErr-${i}"></div>
-      </td>
-      <td class="num" data-label="Alloted">
-        <input type="number" inputmode="decimal" step="0.001" min="0" class="cell-input js-alloted" id="alt-${i}"
-          data-index="${i}" value="${r.alloted ? fmt3(r.alloted) : ''}" placeholder="0.000"
-          aria-label="Alloted for ${esc(r.sector)}" ${lockAlloted ? 'disabled' : ''}>
-        <div class="inline-error hidden" id="altErr-${i}"></div>
-      </td>
-      <td class="num" data-label="Balance"><span class="balance-value" id="bal-${i}">${fmt3(r.balance)}</span></td>
-    </tr>`).join('');
-  $('allocBody').innerHTML = html;
-  $('allocRowCount').textContent = `${rows.length} sectors`;
-}
+    <div class="kpi-grid" aria-label="Daily totals" id="kpiGrid">
+      ${KPI_ORDER.map(
+        (label, i) => `
+        <div class="kpi${i === 4 ? ' kpi--primary' : ''}${i === 5 ? ' kpi--closing' : ''}">
+          <span class="kpi__label">${label}</span>
+          <span class="kpi__value" id="kpi${i}">0.000</span>
+          <span class="kpi__unit">kg</span>
+        </div>`
+      ).join('')}
+    </div>
 
-function renderFlowRows(rows) {
-  const lockAcquired = !STATE.canEditAcquired;
+    <div id="allocBanner"></div>
 
-  if (!rows.length) {
-    $('flowBody').innerHTML =
-      '<tr><td colspan="3" class="empty-cell">No Metal Flow sectors are mapped to your party, so there is nothing to enter here. ' +
-      'Ask the administrator to set the Party for the Metal Flow sectors.</td></tr>';
-    $('flowRowCount').textContent = '0 sectors';
-    return;
-  }
-  const html = rows.map((r, i) => `
-    <tr class="flow-row" data-index="${i}" data-sector="${esc(r.sector)}">
-      <td class="cell-sector" data-label="Sector"><span class="sector-name">${esc(r.sector)}</span></td>
-      <td class="num" data-label="Previous Acquired">
-        <span class="readonly-value readonly-value--blue">${fmt3(r.previous_acquired)}</span>
-      </td>
-      <td class="num" data-label="Today’s Acquired">
-        <input type="number" inputmode="decimal" step="0.001" min="0" class="cell-input cell-input--acquired js-acquired"
-          id="acq-${i}" data-index="${i}" value="${r.today_acquired ? fmt3(r.today_acquired) : ''}" placeholder="0.000"
-          aria-label="Today’s Acquired for ${esc(r.sector)}" ${lockAcquired ? 'disabled' : ''}>
-        <div class="inline-error hidden" id="acqErr-${i}"></div>
-      </td>
-    </tr>`).join('');
-  $('flowBody').innerHTML = html;
-  $('flowRowCount').textContent = `${rows.length} sectors`;
-}
+    <div class="layout">
+      <div class="card panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Allocation</h2>
+          <div class="panel__tools"><span class="chip" id="allocRowCount">0 sectors</span></div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table alloc-table">
+            <thead>
+              <tr>
+                <th class="col-sector">Sector</th>
+                <th class="col-purity">Purity</th>
+                <th class="num">Previous Requirement</th>
+                <th class="num">Today&rsquo;s Required</th>
+                <th class="num">Alloted</th>
+                <th class="num">Balance</th>
+              </tr>
+            </thead>
+            <tbody id="allocBody"></tbody>
+            <tfoot>
+              <tr class="totals-row">
+                <td class="totals-row__label" colspan="2">Totals</td>
+                <td class="num" id="totPrev">0.000</td>
+                <td class="num" id="totReq">0.000</td>
+                <td class="num" id="totAlt">0.000</td>
+                <td class="num" id="totBal">0.000</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
 
-/* -------------------------- calculation ------------------------- */
+      <div class="card panel panel--flow">
+        <div class="panel__head">
+          <h2 class="panel__title">Metal Flow</h2>
+          <div class="panel__tools"><span class="chip" id="flowRowCount">0 sectors</span></div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table flow-table">
+            <thead>
+              <tr>
+                <th class="col-sector">Sector</th>
+                <th class="num">Previous Acquired</th>
+                <th class="num">Today&rsquo;s Acquired</th>
+              </tr>
+            </thead>
+            <tbody id="flowBody"></tbody>
+            <tfoot>
+              <tr class="totals-row">
+                <td class="totals-row__label">Totals</td>
+                <td class="num" id="totPrevAcq">0.000</td>
+                <td class="num" id="totAcq">0.000</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
 
-function readScreen() {
-  const allocations = STATE.model.allocations.map((r, i) => {
-    const reqEl = $(`req-${i}`);
-    const altEl = $(`alt-${i}`);
-    const today_required = num(reqEl ? reqEl.value : r.today_required);
-    const alloted = num(altEl ? altEl.value : r.alloted);
-    return {
-      priority: r.priority,
-      sector: r.sector,
-      purity: r.purity,
-      previous_requirement: r.previous_requirement,
-      today_required,
-      alloted,
-      balance: Math.round((r.previous_requirement + today_required - alloted + Number.EPSILON) * 1000) / 1000,
-    };
-  });
+    <div class="page-spacer"></div>
+    <div class="action-bar">
+      <div class="action-bar__info">
+        <div class="action-bar__remaining" id="remainingBox">
+          <span class="action-bar__label">Remaining to Allocate</span>
+          <span class="action-bar__value" id="remainingValue">0.000 kg</span>
+        </div>
+      </div>
+      <div class="action-bar__buttons">
+        <button type="button" class="btn btn--primary" id="btnSave" ${isAdmin ? '' : 'disabled'}>
+          ${isAdmin ? 'Save Current Data' : 'Administrator only'}
+        </button>
+      </div>
+    </div>
+  `;
 
-  const metal_flow = STATE.model.metal_flow.map((r, i) => {
-    const el = $(`acq-${i}`);
-    return {
-      sector: r.sector,
-      previous_acquired: r.previous_acquired,
-      today_acquired: num(el ? el.value : r.today_acquired),
-    };
-  });
+  const $ = (id) => container.querySelector(`#${id}`);
 
-  return { allocations, metal_flow };
-}
-
-function computeTotals(screen) {
-  const t = {
-    total_previous_requirement: 0, total_today_required: 0, total_alloted: 0,
-    total_balance: 0, total_acquired: 0, total_previous_acquired: 0,
-  };
-  screen.allocations.forEach((r) => {
-    t.total_previous_requirement += r.previous_requirement;
-    t.total_today_required += r.today_required;
-    t.total_alloted += r.alloted;
-    t.total_balance += r.balance;
-  });
-  screen.metal_flow.forEach((r) => {
-    t.total_acquired += r.today_acquired;
-    t.total_previous_acquired += r.previous_acquired;
-  });
-  Object.keys(t).forEach((k) => { t[k] = Math.round((t[k] + Number.EPSILON) * 1000) / 1000; });
-  t.remaining_to_allocate = Math.round((Math.max(0, t.total_acquired - t.total_alloted) + Number.EPSILON) * 1000) / 1000;
-  t.over_allocated_by = Math.round((Math.max(0, t.total_alloted - t.total_acquired) + Number.EPSILON) * 1000) / 1000;
-  return t;
-}
-
-function flagInput(input, errorEl, message) {
-  if (!input || !errorEl) return;
-  if (message) {
-    input.classList.add('is-invalid');
-    errorEl.textContent = message;
-    errorEl.classList.remove('hidden');
-  } else {
-    input.classList.remove('is-invalid');
-    errorEl.classList.add('hidden');
-  }
-}
-
-function recalc() {
-  if (!STATE.model) return undefined;
-
-  const screen = readScreen();
-  const t = computeTotals(screen);
-
-  screen.allocations.forEach((r, i) => {
-    const balEl = $(`bal-${i}`);
-    if (balEl) {
-      balEl.textContent = fmt3(r.balance);
-      balEl.className = `balance-value ${Math.abs(r.balance) < EPS ? 'balance-value--zero' : 'balance-value--positive'}`;
-    }
-    flagInput($(`req-${i}`), $(`reqErr-${i}`), r.today_required < 0 ? 'Negative values are not allowed.' : '');
-    flagInput($(`alt-${i}`), $(`altErr-${i}`), r.alloted < 0 ? 'Negative values are not allowed.' : '');
-  });
-  screen.metal_flow.forEach((r, i) => {
-    flagInput($(`acq-${i}`), $(`acqErr-${i}`), r.today_acquired < 0 ? 'Negative values are not allowed.' : '');
-  });
-
-  $('kpiPrevRequirement').textContent = fmt3(t.total_previous_requirement);
-  $('kpiTodayRequired').textContent = fmt3(t.total_today_required);
-  $('kpiAcquired').textContent = fmt3(t.total_acquired);
-  $('kpiAlloted').textContent = fmt3(t.total_alloted);
-  $('kpiClosingBalance').textContent = fmt3(t.total_balance);
-
-  const demand = t.total_previous_requirement + t.total_today_required;
-  $('kpiAcquiredSub').textContent = demand > 0 ? `${fmt1((t.total_acquired / demand) * 100)}% of today’s demand` : 'kg received today';
-  $('kpiAllotedFulfil').textContent = demand > 0 ? `${fmt1((t.total_alloted / demand) * 100)}%` : '—';
-  $('kpiClosingSub').textContent = demand > 0 ? `${fmt1((t.total_balance / demand) * 100)}% of demand outstanding` : 'kg carried forward';
-
-  $('totPrevRequirement').textContent = fmt3(t.total_previous_requirement);
-  $('totTodayRequired').textContent = fmt3(t.total_today_required);
-  $('totAlloted').textContent = fmt3(t.total_alloted);
-  $('totBalance').textContent = fmt3(t.total_balance);
-  $('totPrevAcquired').textContent = fmt3(t.total_previous_acquired);
-  $('totAcquired').textContent = fmt3(t.total_acquired);
-
-  $('flowSummaryAcquired').textContent = `${fmt3(t.total_acquired)} kg`;
-  $('flowSummaryAlloted').textContent = `${fmt3(t.total_alloted)} kg`;
-  $('flowSummaryRemaining').textContent = `${fmt3(t.remaining_to_allocate)} kg`;
-
-  updateRemainingState(t);
-  updateSaveState(t);
-  return t;
-}
-
-function updateRemainingState(t) {
-  const card = $('kpiRemainingCard');
-  const note = $('kpiRemainingNote');
-  const barWrap = $('barRemainingWrap');
-  const summaryRow = $('flowSummaryRemainingRow');
-
-  $('kpiRemaining').textContent = fmt3(t.remaining_to_allocate);
-  $('barRemaining').textContent = `${fmt3(t.remaining_to_allocate)} kg`;
-
-  let kind = 'primary';
-  if (t.over_allocated_by > 0) kind = 'error';
-  else if (t.total_acquired > 0 && t.remaining_to_allocate === 0) kind = 'done';
-  else if (t.total_acquired > 0 && t.remaining_to_allocate <= Math.round(t.total_acquired * 0.1 * 1000) / 1000) kind = 'warn';
-
-  card.className = `kpi kpi--${kind}`;
-  barWrap.className = `action-bar__remaining${kind === 'error' ? ' is-error' : kind === 'done' ? ' is-done' : kind === 'warn' ? ' is-warn' : ''}`;
-  summaryRow.className = `flow-summary__row flow-summary__row--strong${kind === 'error' ? ' flow-summary__row--error' : kind === 'warn' ? ' flow-summary__row--warn' : ''}`;
-
-  if (kind === 'error') note.textContent = `kg over-allocated by ${fmt3(t.over_allocated_by)}`;
-  else if (kind === 'done') note.textContent = 'kg — fully allocated';
-  else if (kind === 'warn') note.textContent = 'kg nearly exhausted';
-  else note.textContent = 'kg available';
-}
-
-function updateSaveState(t) {
-  const saveBtn = $('btnSave');
-  const resetBtn = $('btnReset');
-
-  if (STATE.isOperator) {
-    const lockedForOperator = !!(STATE.model && STATE.model.is_saved);
-    resetBtn.disabled = lockedForOperator;
-    if (lockedForOperator) {
-      saveBtn.disabled = true;
-      setBarStatus('This date has been finalised by the administrator.');
-      return;
-    }
-    let opReason = '';
-    if (!(t.total_acquired > 0)) opReason = 'Enter Today’s Acquired metal before submitting.';
-    else if (!(t.total_today_required > 0)) opReason = 'Enter Today’s Required weight before submitting.';
-
-    saveBtn.disabled = STATE.busy || !!opReason;
-
-    let opNote;
-    if (opReason) opNote = opReason;
-    else if (t.total_today_required - t.total_acquired > EPS) {
-      opNote = `Ready to submit. Requirement exceeds acquired metal by ${fmt3(t.total_today_required - t.total_acquired)} kg, which carries forward as balance.`;
-    } else {
-      opNote = `Ready to submit ${fmt3(t.total_today_required)} kg of requirement.`;
-    }
-    setBarStatus(opNote);
-    return;
+  function banner(kind, text) {
+    $('allocBanner').innerHTML = text
+      ? `<div class="banner banner--${kind}"><span class="banner__icon">i</span><span>${escapeHtml(text)}</span></div>`
+      : '';
   }
 
-  if (STATE.readOnly) {
-    saveBtn.disabled = true;
-    resetBtn.disabled = true;
-    saveBtn.textContent = 'Save Current Data';
-    setBarStatus('Data Already Saved. This date is locked and cannot be saved again.');
-    return;
-  }
-  resetBtn.disabled = false;
+  function renderRows() {
+    const lockAlloted = !isAdmin || model.is_saved;
+    const lockRequired = model.is_saved;
 
-  let reason = '';
-  if (!(t.total_acquired > 0)) reason = 'Enter Today’s Acquired metal in the Metal Flow panel before saving.';
+    $('allocBody').innerHTML = model.allocations.length
+      ? model.allocations
+          .map(
+            (row, i) => `
+        <tr class="alloc-row" data-index="${i}">
+          <td class="cell-sector" data-label="Sector">
+            <span class="sector-name">${escapeHtml(row.sector_name)}</span>
+          </td>
+          <td class="cell-purity" data-label="Purity">${escapeHtml(row.purity)}</td>
+          <td class="num" data-label="Previous Requirement">
+            <span class="readonly-value">${fmt3(row.previous_requirement_kg)}</span>
+          </td>
+          <td class="num" data-label="Today's Required">
+            <input type="text" inputmode="decimal" class="cell-input js-required" data-index="${i}"
+                   value="${fmt3(row.today_required_kg)}" ${lockRequired ? 'disabled' : ''}>
+          </td>
+          <td class="num" data-label="Alloted">
+            <input type="text" inputmode="decimal" class="cell-input js-alloted" data-index="${i}"
+                   value="${fmt3(row.alloted_kg)}" ${lockAlloted ? 'disabled' : ''}>
+          </td>
+          <td class="num" data-label="Balance">
+            <span class="${balanceClass(toGrams(row.balance_kg))}" id="bal${i}">${fmt3(row.balance_kg)}</span>
+          </td>
+        </tr>`
+          )
+          .join('')
+      : `<tr><td colspan="6" class="empty-cell">No allocation sectors are mapped to your party.
+           Ask the administrator to check the Party column.</td></tr>`;
 
-  saveBtn.disabled = STATE.busy || !!reason;
+    $('flowBody').innerHTML = model.metal_flow.length
+      ? model.metal_flow
+          .map(
+            (row, i) => `
+          <tr data-index="${i}">
+            <td class="cell-sector" data-label="Sector">
+              <span class="sector-name">${escapeHtml(row.sector_name)}</span>
+            </td>
+            <td class="num" data-label="Previous Acquired">
+              <span class="readonly-value">${fmt3(row.previous_acquired_kg)}</span>
+            </td>
+            <td class="num" data-label="Today's Acquired">
+              <input type="text" inputmode="decimal" class="cell-input cell-input--acquired js-acquired"
+                     data-index="${i}" value="${fmt3(row.today_acquired_kg)}" ${lockRequired ? 'disabled' : ''}>
+            </td>
+          </tr>`
+          )
+          .join('')
+      // The two sector sets are scoped independently through party, so one can
+      // be empty while the other is not. Say which, rather than leaving a table
+      // showing nothing but a zero totals row (legacy Scripts.html).
+      : `<tr><td colspan="3" class="empty-cell">No Metal Flow sectors are mapped to your
+           party, so there is nothing to enter here. Ask the administrator to set the
+           Party for the Metal Flow sectors.</td></tr>`;
 
-  let note;
-  if (reason) note = reason;
-  else if (t.over_allocated_by > 0) note = `Ready to save. Alloted exceeds Acquired by ${fmt3(t.over_allocated_by)} kg.`;
-  else if (t.remaining_to_allocate > 0) note = `Ready to save. ${fmt3(t.remaining_to_allocate)} kg still unallocated.`;
-  else note = `Ready to save. ${fmt3(t.total_alloted)} kg fully allocated.`;
-  setBarStatus(note);
-}
+    $('allocRowCount').textContent = `${model.allocations.length} sectors`;
+    $('flowRowCount').textContent = `${model.metal_flow.length} sectors`;
 
-function applyRoleChrome() {
-  const operator = STATE.isOperator;
-
-  const remainingCard = $('kpiRemainingCard');
-  if (remainingCard) remainingCard.classList.toggle('hidden', operator && !STATE.showGlobalTotals);
-  const remainingRow = $('flowSummaryRemainingRow');
-  if (remainingRow) remainingRow.classList.toggle('hidden', operator);
-  const barWrap = $('barRemainingWrap');
-  if (barWrap) barWrap.classList.toggle('hidden', operator);
-
-  const saveBtn = $('btnSave');
-  if (saveBtn && saveBtn.dataset.mode !== 'revise') {
-    saveBtn.textContent = operator ? 'Submit Requirement' : 'Save Current Data';
-  }
-  const reviseBtn = $('btnAdminRevise');
-  if (reviseBtn && operator) reviseBtn.classList.add('hidden');
-}
-
-/* --------------------------- data loading ----------------------- */
-
-async function bootstrap() {
-  showOverlay('Starting the application…');
-  try {
-    const data = await allocationsApi.getAppBootstrapData();
-    hideOverlay();
-    STATE.isAdmin = !!(data.access && data.access.is_admin);
-    STATE.role = (data.access && data.access.role) || (STATE.isAdmin ? 'ADMIN' : 'OPERATOR');
-    STATE.isOperator = !STATE.isAdmin;
-    applyRoleChrome();
-    STATE.email = (data.access && data.access.email) || '';
-    STATE.displayName = (data.access && data.access.display_name) || STATE.email;
-    $('hdrUser').textContent = STATE.displayName;
-    $('hdrUser').title = STATE.email;
-    const initial = data.today || todayIso();
-    $('allocationDate').value = initial;
-    await loadDate(initial);
-  } catch (err) {
-    hideOverlay();
-    setHeaderStatus('error', 'Error');
-    setBanner('error', err.message || 'The application could not reach the server. Reload the page and try again.');
-    console.error(err);
-  }
-}
-
-async function loadDate(dateValue) {
-  if (!dateValue) {
-    setBanner('warn', 'Select an allocation date.');
-    return;
-  }
-  showOverlay('Loading previous day data…');
-  setHeaderStatus('neutral', 'Loading');
-  $('btnSave').disabled = true;
-
-  try {
-    const model = await allocationsApi.getAllocationForDate(dateValue);
-    hideOverlay();
-    applyModel(model, model.code, model.message);
-  } catch (err) {
-    hideOverlay();
-    setHeaderStatus('error', 'Error');
-    setBanner('error', err.message || 'The date could not be loaded. Check the connection and try again.');
-    console.error(err);
-  }
-}
-
-function applyModel(model, code, message) {
-  STATE.model = model;
-  STATE.dateKey = model.selected_date;
-  STATE.readOnly = !!model.read_only;
-  STATE.canRevise = !!model.can_revise;
-  STATE.isOperator = !!model.is_operator;
-  STATE.canEditRequired = model.can_edit_required !== false && !model.is_saved;
-  STATE.canEditAcquired = model.can_edit_acquired !== false && !model.is_saved;
-  STATE.canEditAlloted = model.can_edit_alloted !== false && !model.is_saved;
-  STATE.showGlobalTotals = model.show_global_totals !== false;
-  applyRoleChrome();
-  STATE.baseline = JSON.parse(JSON.stringify({ allocations: model.allocations, metal_flow: model.metal_flow }));
-
-  $('hdrSelectedDate').textContent = model.selected_date_display;
-  $('hdrPrevDate').textContent = model.previous_source_date_display;
-  $('prevSourceDateBox').textContent = model.previous_source_date_display;
-
-  renderAllocationRows(model.allocations);
-  renderFlowRows(model.metal_flow);
-
-  if (model.is_saved) {
-    setHeaderStatus('locked', 'Saved / Read-only');
-    $('dateStatusBox').textContent = `Data Already Saved (${model.saved_record_count} allocation records)`;
-    setBanner('locked', 'Data Already Saved. This date is locked and cannot be saved again. Select a new date.');
-  } else {
-    setHeaderStatus('editable', 'Editable');
-    $('dateStatusBox').textContent = 'Not saved yet — open for entry';
-    if (code === 'NO_PREVIOUS_DATA') {
-      setBanner('info', message || 'No previous source date records were found. Previous values are shown as 0.000.');
-    } else {
-      setBanner('info', `Previous values loaded from ${model.previous_source_date_display}.`);
-    }
-  }
-
-  $('btnAdminRevise').classList.toggle('hidden', !STATE.canRevise);
-  recalc();
-  announceSubmissions(model);
-}
-
-function announceSubmissions(model) {
-  const list = model.staging_submissions || [];
-
-  if (STATE.isOperator) {
-    if (model.is_submitted) {
-      setBanner('locked', `Requirement submitted${model.submitted_at ? ` on ${model.submitted_at}` : ''}. It is locked and awaiting the administrator.`);
-    }
-    return;
-  }
-
-  if (!list.length || model.is_saved) return;
-
-  const partyRows = list.map((s) => (
-    `<li style="margin-bottom:6px;"><strong>${esc(s.party)}</strong>${s.submitted_at ? ` <span style="color:#5b6577;font-size:12px;">submitted ${esc(s.submitted_at)}</span>` : ''}</li>`
-  )).join('');
-
-  openModal({
-    title: `Requirements Received (${list.length})`,
-    confirmLabel: 'Continue',
-    bodyHtml:
-      `The following part${list.length === 1 ? 'y has' : 'ies have'} submitted a requirement for ` +
-      `<strong>${esc(model.selected_date_display)}</strong>:` +
-      `<ul style="margin:12px 0 0 18px;padding:0;">${partyRows}</ul>` +
-      '<div style="margin-top:14px;">Their figures are already loaded into the Today’s Required and ' +
-      'Today’s Acquired fields. Adjust them if needed, enter the allocation, then save.</div>',
-    onConfirm: closeModal,
-  });
-}
-
-/* ------------------------------ saving -------------------------- */
-
-function buildPayload(extra) {
-  const screen = readScreen();
-  const payload = {
-    request_id: uuid(),
-    selected_date: STATE.dateKey,
-    allocations: screen.allocations.map((r) => ({
-      sector: r.sector, priority: r.priority, purity: r.purity,
-      previous_requirement: r.previous_requirement, today_required: r.today_required, alloted: r.alloted,
-    })),
-    metal_flow: screen.metal_flow.map((r) => ({ sector: r.sector, today_acquired: r.today_acquired })),
-  };
-  if (extra) Object.keys(extra).forEach((k) => { payload[k] = extra[k]; });
-  return payload;
-}
-
-function requestSubmission() {
-  if (STATE.busy) return;
-  const t = recalc();
-  if ($('btnSave').disabled) {
-    toast('warn', $('barStatus').textContent);
-    return;
-  }
-  openModal({
-    title: 'Submit Requirement',
-    confirmLabel: 'Submit Requirement',
-    bodyHtml:
-      `Submit your requirement for <strong>${esc(STATE.model.selected_date_display)}</strong>?<br><br>` +
-      `Total Today’s Required: <strong>${fmt3(t.total_today_required)} kg</strong><br>` +
-      `Total Today’s Acquired: <strong>${fmt3(t.total_acquired)} kg</strong><br><br>` +
-      '<strong>A submission cannot be changed once sent.</strong> It will be locked until the administrator finalises the date.',
-    onConfirm: () => { closeModal(); doSubmit(); },
-  });
-}
-
-async function doSubmit() {
-  STATE.busy = true;
-  $('btnSave').disabled = true;
-  showOverlay('Submitting your requirement…');
-
-  try {
-    const res = await stagingApi.submitOperatorRequirements(buildPayload());
-    STATE.busy = false;
-    hideOverlay();
-    toast('success', `Requirement submitted for ${res.selected_date}.`);
-    setBanner('success', 'Requirement submitted. It is now locked and awaiting the administrator.');
-    await loadDate(STATE.dateKey);
-  } catch (err) {
-    STATE.busy = false;
-    hideOverlay();
-    const msg = err.message || 'The requirement could not be submitted.';
-    toast('error', msg);
-    setBanner('error', msg);
+    container.querySelectorAll('.cell-input').forEach((input) => {
+      input.addEventListener('input', recalc);
+      // Normalise to 3 decimals once the user leaves the cell: '1' -> '1.000',
+      // '2.5' -> '2.500'. Done on blur rather than on every keystroke so it
+      // cannot fight the user mid-type (typing '1.' would otherwise snap).
+      input.addEventListener('blur', () => {
+        const grams = toGrams(input.value);
+        if (grams === null) return; // leave invalid text alone for correction
+        input.value = formatGrams(grams);
+        recalc();
+      });
+    });
     recalc();
   }
-}
 
-function requestSave() {
-  if (STATE.busy || STATE.readOnly) return;
-  const t = recalc();
-  if ($('btnSave').disabled) {
-    toast('warn', $('barStatus').textContent);
-    return;
-  }
-  openModal({
-    title: 'Confirm Save',
-    confirmLabel: 'Save Current Data',
-    bodyHtml:
-      `Save the allocation for <strong>${esc(STATE.model.selected_date_display)}</strong>?<br><br>` +
-      `Total Today’s Acquired: <strong>${fmt3(t.total_acquired)} kg</strong><br>` +
-      `Actual Total Alloted: <strong>${fmt3(t.total_alloted)} kg</strong><br>` +
-      `Unallocated: <strong>${fmt3(t.remaining_to_allocate)} kg</strong><br>` +
-      `Closing Balance: <strong>${fmt3(t.total_balance)} kg</strong><br><br>` +
-      'A saved date becomes permanently locked for regular users.',
-    onConfirm: () => { closeModal(); doSave(); },
-  });
-}
+  /** Live recalculation, ported from Scripts.html's recalc(). Grams only. */
+  function recalc() {
+    let totPrev = 0;
+    let totReq = 0;
+    let totAlt = 0;
+    let totBal = 0;
 
-async function doSave() {
-  STATE.busy = true;
-  $('btnSave').disabled = true;
-  showOverlay('Saving allocation and Metal Flow data…');
+    model.allocations.forEach((row, i) => {
+      const prev = toGrams(row.previous_requirement_kg) || 0;
+      const reqInput = container.querySelector(`.js-required[data-index="${i}"]`);
+      const altInput = container.querySelector(`.js-alloted[data-index="${i}"]`);
+      const req = toGrams(reqInput.value);
+      const alt = toGrams(altInput.value);
 
-  try {
-    const res = await allocationsApi.saveDailyAllocation(buildPayload());
-    STATE.busy = false;
-    hideOverlay();
-    toast('success', `Data saved successfully. ${res.master_records} allocation records and ${res.flow_records} Metal Flow records were created.`);
-    setBanner('success', 'Data saved successfully.');
-    await loadDate(STATE.dateKey);
-  } catch (err) {
-    STATE.busy = false;
-    hideOverlay();
-    const msg = err.message || 'The data could not be saved.';
-    toast('error', msg);
-    setBanner('error', msg);
-    if (err.code === 'DATE_ALREADY_SAVED') await loadDate(STATE.dateKey);
-    else recalc();
-  }
-}
+      reqInput.classList.toggle('is-invalid', req === null);
+      altInput.classList.toggle('is-invalid', alt === null);
 
-/* --------------------- administrator revision ------------------- */
+      const balance = prev + (req || 0) - (alt || 0);
+      const cell = $(`bal${i}`);
+      cell.textContent = formatGrams(balance);
+      cell.className = balanceClass(balance);
 
-function requestRevision() {
-  if (!STATE.canRevise) {
-    toast('warn', 'Only an authorized administrator can revise a saved date.');
-    return;
-  }
-  STATE.readOnly = false;
-  STATE.canEditRequired = true;
-  STATE.canEditAcquired = true;
-  STATE.canEditAlloted = true;
-  renderAllocationRows(STATE.model.allocations);
-  renderFlowRows(STATE.model.metal_flow);
-  setHeaderStatus('warn', 'Revision mode');
-  setBanner('warn', 'Revision mode. Edit the values, then use Submit Revision. All changes are audited.');
-  $('btnSave').textContent = 'Submit Revision';
-  $('btnSave').dataset.mode = 'revise';
-  $('btnAdminRevise').classList.add('hidden');
-  recalc();
-  $('btnSave').disabled = false;
-  updateSaveState(recalc());
-}
-
-function requestRevisionSubmit() {
-  const t = recalc();
-  openModal({
-    title: 'Submit Revision',
-    confirmLabel: 'Submit Revision',
-    requireReason: true,
-    bodyHtml:
-      `Revise the saved allocation for <strong>${esc(STATE.model.selected_date_display)}</strong>.<br><br>` +
-      'The existing records in Metal Master and Metal Flow Master will be replaced. ' +
-      'A before-and-after snapshot is written to the audit log.<br><br>' +
-      `Actual Total Alloted: <strong>${fmt3(t.total_alloted)} kg</strong> &middot; Total Acquired: <strong>${fmt3(t.total_acquired)} kg</strong>`,
-    onConfirm: () => {
-      const reason = String($('modalReason').value || '').trim();
-      if (reason.length < 10) {
-        $('modalReasonError').textContent = 'The revision reason must be at least 10 characters.';
-        $('modalReasonError').classList.remove('hidden');
-        return;
-      }
-      closeModal();
-      doRevise(reason);
-    },
-  });
-}
-
-async function doRevise(reason) {
-  STATE.busy = true;
-  $('btnSave').disabled = true;
-  showOverlay('Submitting the administrator revision…');
-
-  try {
-    const res = await allocationsApi.reviseDailyAllocation(buildPayload({ revision_reason: reason }));
-    STATE.busy = false;
-    hideOverlay();
-    toast('success', `Revision ${res.revision_number} saved successfully.`);
-    setBanner('success', 'Revision saved successfully.');
-  } catch (err) {
-    STATE.busy = false;
-    hideOverlay();
-    toast('error', err.message || 'The revision could not be completed.');
-    setBanner('error', err.message || 'The revision could not be completed.');
-  } finally {
-    $('btnSave').textContent = 'Save Current Data';
-    delete $('btnSave').dataset.mode;
-    await loadDate(STATE.dateKey);
-  }
-}
-
-/* ------------------------------ reset --------------------------- */
-
-function resetUnsaved() {
-  if (!STATE.baseline || STATE.busy) return;
-  openModal({
-    title: 'Reset Unsaved Changes',
-    confirmLabel: 'Reset',
-    bodyHtml: 'Discard all values entered on this screen and restore the loaded starting values? Saved data is not affected.',
-    onConfirm: () => {
-      closeModal();
-      STATE.model.allocations = JSON.parse(JSON.stringify(STATE.baseline.allocations));
-      STATE.model.metal_flow = JSON.parse(JSON.stringify(STATE.baseline.metal_flow));
-      renderAllocationRows(STATE.model.allocations);
-      renderFlowRows(STATE.model.metal_flow);
-      recalc();
-      toast('info', 'Unsaved changes were reset.');
-    },
-  });
-}
-
-/* ----------------------------- events --------------------------- */
-
-function bindEvents() {
-  $('allocationDate').addEventListener('change', function onDateChange() {
-    $('btnSave').textContent = 'Save Current Data';
-    delete $('btnSave').dataset.mode;
-    loadDate(this.value);
-  });
-
-  $('btnReloadDate').addEventListener('click', () => {
-    $('btnSave').textContent = 'Save Current Data';
-    delete $('btnSave').dataset.mode;
-    loadDate($('allocationDate').value);
-  });
-
-  $('btnSave').addEventListener('click', function onSaveClick() {
-    if (this.dataset.mode === 'revise') requestRevisionSubmit();
-    else if (STATE.isOperator) requestSubmission();
-    else requestSave();
-  });
-
-  $('btnReset').addEventListener('click', resetUnsaved);
-  $('btnAdminRevise').addEventListener('click', requestRevision);
-
-  document.addEventListener('input', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('cell-input')) recalc();
-  });
-  document.addEventListener('change', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('cell-input')) {
-      let v = num(e.target.value);
-      if (v < 0) v = 0;
-      e.target.value = e.target.value === '' ? '' : fmt3(v);
-      recalc();
-    }
-  });
-
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest ? e.target.closest('.row-toggle') : null;
-    if (!btn) return;
-    const row = btn.closest('tr');
-    if (!row) return;
-    row.classList.toggle('is-collapsed');
-    btn.innerHTML = row.classList.contains('is-collapsed') ? '&plus;' : '&minus;';
-  });
-
-  $('btnToggleCards').addEventListener('click', function onToggleAll() {
-    const rows = document.querySelectorAll('#allocBody tr.alloc-row');
-    const collapseAll = this.textContent.indexOf('Collapse') === 0;
-    rows.forEach((row) => {
-      row.classList.toggle('is-collapsed', collapseAll);
-      const tgl = row.querySelector('.row-toggle');
-      if (tgl) tgl.innerHTML = collapseAll ? '&plus;' : '&minus;';
+      totPrev += prev;
+      totReq += req || 0;
+      totAlt += alt || 0;
+      totBal += balance;
     });
-    this.textContent = collapseAll ? 'Expand all' : 'Collapse all';
-  });
 
-  window.addEventListener('beforeunload', (e) => {
-    if (STATE.readOnly || !STATE.model) return;
-    const t = computeTotals(readScreen());
-    if (t.total_alloted > 0 || t.total_acquired > 0 || t.total_today_required > 0) {
-      e.preventDefault();
-      e.returnValue = '';
+    let totAcq = 0;
+    let totPrevAcq = 0;
+    model.metal_flow.forEach((row, i) => {
+      const input = container.querySelector(`.js-acquired[data-index="${i}"]`);
+      const acquired = toGrams(input.value);
+      input.classList.toggle('is-invalid', acquired === null);
+      totAcq += acquired || 0;
+      totPrevAcq += toGrams(row.previous_acquired_kg) || 0;
+    });
+
+    $('totPrev').textContent = formatGrams(totPrev);
+    $('totReq').textContent = formatGrams(totReq);
+    $('totAlt').textContent = formatGrams(totAlt);
+    $('totBal').textContent = formatGrams(totBal);
+    $('totAcq').textContent = formatGrams(totAcq);
+    $('totPrevAcq').textContent = formatGrams(totPrevAcq);
+
+    const remaining = Math.max(0, totAcq - totAlt);
+    $('remainingValue').textContent = `${formatGrams(remaining)} kg`;
+    const box = $('remainingBox');
+    box.classList.toggle('is-done', remaining === 0 && totAcq > 0);
+    box.classList.toggle('is-warn', remaining > 0);
+
+    [totPrev, totReq, totAcq, totAlt, remaining, totBal].forEach((value, i) => {
+      $(`kpi${i}`).textContent = formatGrams(value);
+    });
+  }
+
+  function collect() {
+    return {
+      allocations: model.allocations.map((row, i) => ({
+        sector_id: row.sector_id,
+        previous_requirement_kg: fmt3(row.previous_requirement_kg),
+        today_required_kg: container.querySelector(`.js-required[data-index="${i}"]`).value || '0',
+        alloted_kg: container.querySelector(`.js-alloted[data-index="${i}"]`).value || '0',
+      })),
+      metalFlow: model.metal_flow.map((row, i) => ({
+        flow_sector_id: row.flow_sector_id,
+        today_acquired_kg: container.querySelector(`.js-acquired[data-index="${i}"]`).value || '0',
+      })),
+    };
+  }
+
+  async function load(isoDate) {
+    $('dateStatusBox').textContent = 'Loading…';
+    banner('', '');
+    try {
+      model = await getAllocationForDate(isoDate);
+      selectedDate = isoDate;
+      $('prevSourceDateBox').textContent = model.previous_source_date_display;
+      $('dateStatusBox').textContent = model.is_saved
+        ? 'Saved — this date is locked. Use a revision to change it.'
+        : 'Editable — not yet saved.';
+      if (model.used_fallback_source) {
+        banner(
+          'warn',
+          `Nothing was saved on the rule date (${model.rule_source_date_display}); figures were carried from ${model.previous_source_date_display}.`
+        );
+      }
+      $('btnSave').disabled = !isAdmin || model.is_saved;
+      renderRows();
+    } catch (err) {
+      $('dateStatusBox').textContent = 'Could not load this date.';
+      banner('error', err.message);
+    }
+  }
+
+  $('allocationDate').addEventListener('change', (e) => load(e.target.value));
+  $('btnReloadDate').addEventListener('click', () => load(selectedDate));
+
+  $('btnSave').addEventListener('click', async () => {
+    const button = $('btnSave');
+    button.disabled = true;
+    button.textContent = 'Saving…';
+    try {
+      const payload = collect();
+      const result = await saveAllocation(selectedDate, {
+        ...payload,
+        requestId: newRequestId(),
+      });
+      banner(
+        'success',
+        `Saved ${result.allocation_records} allocation and ${result.flow_records} Metal Flow records. Audit ${result.audit_id}.`
+      );
+      await load(selectedDate);
+    } catch (err) {
+      banner('error', err.message);
+      button.disabled = false;
+    } finally {
+      button.textContent = isAdmin ? 'Save Current Data' : 'Administrator only';
     }
   });
-}
 
-export function init() {
-  bindEvents();
-  bootstrap();
+  load(selectedDate);
 }

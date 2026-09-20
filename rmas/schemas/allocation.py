@@ -1,183 +1,94 @@
 """
-schemas/allocation.py — Daily Allocation screen request/response shapes.
+schemas/allocation.py — the Daily Allocation screen model as sent to the client.
 
-Legacy: Code.gs's getAppBootstrapData(), getAllocationForDate(),
-saveDailyAllocation(), reviseDailyAllocation() payloads, plus the
-DataService.gs buildAllocationModel_() screen model they return.
+Weights cross this boundary as KILOGRAMS (`Decimal`, 3 decimals), converted from
+the integer grams held in the database by services/weight_service.py. The `_kg`
+suffix mirrors the database's `_g` suffix so the unit is never ambiguous.
 """
 
-from datetime import date as date_
+from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
-
-from rmas.schemas.auth import CurrentUserOut
-from rmas.schemas.common import PartyOut
+from pydantic import BaseModel
 
 
-class AllocationSectorOut(BaseModel):
+class AllocationRowResponse(BaseModel):
+    sector_id: int
+    sector_name: str
     priority: str
-    party: str
-    sector: str
     purity: str
+    party_name: str
+    previous_requirement_kg: Decimal
+    today_required_kg: Decimal
+    alloted_kg: Decimal
+    balance_kg: Decimal
 
 
-class FlowSectorOut(BaseModel):
-    sector: str
-    party: str
+class FlowRowResponse(BaseModel):
+    flow_sector_id: int
+    sector_name: str
+    party_name: str
+    previous_acquired_kg: Decimal
+    today_acquired_kg: Decimal
 
 
-class BootstrapConfigOut(BaseModel):
-    """Legacy getPublicConfig_() — never includes admin emails."""
-
-    app_name: str
-    app_version: str
-    decimals: int
-    expected_allocation_rows: int
-    expected_flow_rows: int
-    require_full_allocation: bool
-    require_positive_acquired: bool
-    min_revision_reason_length: int
+class TotalsResponse(BaseModel):
+    total_previous_requirement_kg: Decimal
+    total_today_required_kg: Decimal
+    total_alloted_kg: Decimal
+    total_balance_kg: Decimal
+    total_acquired_kg: Decimal
+    remaining_to_allocate_kg: Decimal
 
 
-class BootstrapOut(BaseModel):
-    config: BootstrapConfigOut
-    access: CurrentUserOut
-    time_zone: str
-    today: date_
-    parties: list[PartyOut]
-    role: str
-    allocation_sectors: list[AllocationSectorOut]
-    flow_sectors: list[FlowSectorOut]
+class AllocationRowInput(BaseModel):
+    """One submitted allocation row.
+
+    Only the three weights are accepted. Sector name, party, purity and priority
+    are taken from the database on the server — never from the client — so a
+    tampered payload cannot rename a sector or move it to another party.
+    """
+
+    sector_id: int
+    previous_requirement_kg: Decimal
+    today_required_kg: Decimal
+    alloted_kg: Decimal
 
 
-# ---------------------------------------------------------------- inbound --
-
-
-class AllocationLineIn(BaseModel):
-    sector: str
-    priority: str = ""
-    purity: str = ""
-    previous_requirement: Decimal = Decimal("0")
-    today_required: Decimal = Decimal("0")
-    alloted: Decimal = Decimal("0")
-
-
-class FlowLineIn(BaseModel):
-    sector: str
-    today_acquired: Decimal = Decimal("0")
+class FlowRowInput(BaseModel):
+    flow_sector_id: int
+    today_acquired_kg: Decimal
 
 
 class SaveAllocationRequest(BaseModel):
+    allocations: list[AllocationRowInput]
+    metal_flow: list[FlowRowInput]
+    # Client-generated; a repeat within 900 seconds must not write twice
+    # (CLAUDE.md section 6, rule 12).
     request_id: str
-    selected_date: date_
-    allocations: list[AllocationLineIn]
-    metal_flow: list[FlowLineIn]
 
 
-class ReviseAllocationRequest(SaveAllocationRequest):
-    revision_reason: str
+class SaveAllocationResponse(BaseModel):
+    allocation_date: date
+    allocation_records: int
+    flow_records: int
+    audit_id: str
+    request_id: str
+    totals: "TotalsResponse"
 
 
-# --------------------------------------------------------------- outbound --
-
-
-class TotalsOut(BaseModel):
-    total_previous_requirement: Decimal
-    total_today_required: Decimal
-    total_alloted: Decimal
-    total_balance: Decimal
-    total_acquired: Decimal
-    remaining_to_allocate: Decimal
-
-
-class AllocationLineOut(BaseModel):
-    priority: str
-    party: str
-    sector: str
-    purity: str
-    previous_requirement: Decimal
-    today_required: Decimal
-    alloted: Decimal
-    balance: Decimal
-    from_submission: bool = False
-
-
-class FlowLineOut(BaseModel):
-    sector: str
-    party: str
-    previous_acquired: Decimal
-    today_acquired: Decimal
-    from_submission: bool = False
-
-
-class StagingSubmissionSummaryOut(BaseModel):
-    party: str
-    operator_email: str
-    operator_name: str
-    submitted_at: str
-    submission_id: str
-    total_required: Decimal
-    total_acquired: Decimal
-
-
-class AllocationModelOut(BaseModel):
-    selected_date: date_
+class AllocationModelResponse(BaseModel):
+    selected_date: date
     selected_date_display: str
-    previous_source_date: date_ | None
-    previous_source_date_display: str
-    rule_source_date: date_
+    rule_source_date: date
     rule_source_date_display: str
+    previous_source_date: date
+    previous_source_date_display: str
+    # True when the rule date had nothing saved and an older date was used.
     used_fallback_source: bool
     has_previous_data: bool
     is_saved: bool
-    saved_record_count: int
-    saved_flow_record_count: int
-
-    allocations: list[AllocationLineOut]
-    metal_flow: list[FlowLineOut]
-    parties: list[PartyOut]
-    totals: TotalsOut
-    total_previous_acquired: Decimal
-
-    access: CurrentUserOut
-    role: str
-    is_operator: bool
-    read_only: bool
-    can_revise: bool
-    can_edit_required: bool
-    can_edit_acquired: bool
-    can_edit_alloted: bool
-    show_global_totals: bool
-
-    is_submitted: bool = False
-    submitted_at: str = ""
-    submitted_by: str = ""
-    staging_submissions: list[StagingSubmissionSummaryOut] = Field(default_factory=list)
-
-    code: str
-    message: str
-
-
-class SaveResultOut(BaseModel):
-    selected_date: date_
-    selected_date_display: str
-    master_records: int
-    flow_records: int
-    staging_rows_consumed: int
-    totals: TotalsOut
-    audit_id: str
-    request_id: str
-
-
-class ReviseResultOut(BaseModel):
-    selected_date: date_
-    revision_number: int
-    audit_id: str
-    totals: TotalsOut
-    request_id: str
-
-
-class DateAlreadySavedOut(BaseModel):
-    selected_date: date_
-    is_saved: bool
+    allocations: list[AllocationRowResponse]
+    metal_flow: list[FlowRowResponse]
+    totals: TotalsResponse
+    total_previous_acquired_kg: Decimal

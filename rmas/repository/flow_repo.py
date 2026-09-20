@@ -1,72 +1,57 @@
 """
-flow_repo.py — Metal Flow Master (FlowRecord) queries and writes.
-The only place this table is touched.
+repository/flow_repo.py
+Royal Metal Allocation System — Python port
 
-Legacy: DataService.gs's readFlowMasterRows_(), buildFlowRowValues_(),
-appendBothMasters_() (the flow half), deleteRowsForDate_() (flow half).
+The supply ledger (`metal_flow_master`). The only place SQLAlchemy touches it.
+
+Note the allocation and flow ledgers resolve their carry-forward source dates
+INDEPENDENTLY in legacy's buildAllocationModel_ — one may fall back to an older
+date than the other — which is why this mirrors allocation_repo rather than
+sharing a query with it.
 """
 
-from datetime import date as date_
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session, selectinload
-
-from rmas.models.flow import FlowRecord
-from rmas.models.sector import FlowSector
+from models.flow import MetalFlowMaster
 
 
-def get_for_date(db: Session, flow_date: date_) -> dict[str, FlowRecord]:
-    rows = db.scalars(
-        select(FlowRecord)
-        .options(selectinload(FlowRecord.flow_sector).selectinload(FlowSector.party))
-        .where(FlowRecord.flow_date == flow_date)
+def get_rows_for_date(db: Session, allocation_date: str) -> list[MetalFlowMaster]:
+    return list(
+        db.scalars(
+            select(MetalFlowMaster).where(MetalFlowMaster.allocation_date == allocation_date)
+        )
     )
-    return {r.flow_sector.sector_key: r for r in rows}
 
 
-def exists_for_date(db: Session, flow_date: date_) -> bool:
-    return db.scalar(
-        select(func.count()).select_from(FlowRecord).where(FlowRecord.flow_date == flow_date)
+def date_exists(db: Session, allocation_date: str) -> bool:
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(MetalFlowMaster)
+            .where(MetalFlowMaster.allocation_date == allocation_date)
+        )
+        or 0
     ) > 0
 
 
-def latest_date_before(db: Session, before_date: date_) -> date_ | None:
-    return db.scalar(select(func.max(FlowRecord.flow_date)).where(FlowRecord.flow_date < before_date))
+def latest_date_before(db: Session, allocation_date: str) -> str | None:
+    return db.scalar(
+        select(func.max(MetalFlowMaster.allocation_date)).where(
+            MetalFlowMaster.allocation_date < allocation_date
+        )
+    )
 
 
-def insert_rows(db: Session, rows: list[FlowRecord]) -> int:
+def insert_rows(db: Session, rows: list[MetalFlowMaster]) -> int:
     db.add_all(rows)
     db.flush()
     return len(rows)
 
 
-def delete_for_date(db: Session, flow_date: date_) -> list[FlowRecord]:
-    rows = list(db.scalars(select(FlowRecord).where(FlowRecord.flow_date == flow_date)))
-    db.execute(delete(FlowRecord).where(FlowRecord.flow_date == flow_date))
+def delete_rows_for_date(db: Session, allocation_date: str) -> int:
+    rows = get_rows_for_date(db, allocation_date)
+    for row in rows:
+        db.delete(row)
     db.flush()
-    return rows
-
-
-def list_for_history(
-    db: Session,
-    *,
-    date_from: date_ | None,
-    date_to: date_ | None,
-    sector_keys: list[str] | None,
-    party_keys: frozenset[str] | None,
-) -> list[FlowRecord]:
-    """Legacy getMetalFlowHistory()'s row fetch."""
-    stmt = select(FlowRecord).options(
-        selectinload(FlowRecord.flow_sector).selectinload(FlowSector.party)
-    )
-    if date_from:
-        stmt = stmt.where(FlowRecord.flow_date >= date_from)
-    if date_to:
-        stmt = stmt.where(FlowRecord.flow_date <= date_to)
-    if sector_keys:
-        stmt = stmt.join(FlowRecord.flow_sector).where(FlowSector.sector_key.in_(sector_keys))
-
-    rows = list(db.scalars(stmt))
-    if party_keys is not None:
-        rows = [r for r in rows if r.flow_sector.party and r.flow_sector.party.party_key in party_keys]
-    return rows
+    return len(rows)

@@ -1,238 +1,233 @@
-"""
-schemas/report.py — Allocation History, Metal Flow History, Analysis
-Dashboard shapes. Legacy: ReportService.gs.
+"""schemas/report.py — history and dashboard responses.
+
+Weights cross as kilogram strings (`Decimal`), converted from integer grams.
+Only rows the caller may see are ever included; the scoping happens in SQL.
 """
 
-from datetime import date as date_
+from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
-
-from rmas.schemas.common import PageInfo
+from pydantic import BaseModel
 
 
-class HistoryFilters(BaseModel):
-    from_date: date_ | None = None
-    to_date: date_ | None = None
-    sectors: list[str] | None = None
-    priorities: list[str] | None = None
-    purities: list[str] | None = None
-    status: str = "all"  # all | pending | cleared | allocated | unallocated
-    limit: int = 100
-    offset: int = 0
-
-
-class SectorOption(BaseModel):
-    sector: str
-    key: str
-    active: bool
-
-
-class LabelledOption(BaseModel):
-    label: str
-    key: str
-
-
-class HistoryFilterOptionsOut(BaseModel):
-    allocation_sectors: list[SectorOption]
-    flow_sectors: list[SectorOption]
-    priorities: list[LabelledOption]
-    purities: list[LabelledOption]
-    saved_date_count: int
-    min_date: date_ | None
-    max_date: date_ | None
-    suggested_from: date_ | None
-    suggested_to: date_ | None
-    allocation_record_count: int
-    flow_record_count: int
-
-
-class AllocationHistoryRowOut(BaseModel):
-    date_key: date_
+class AllocationHistoryRow(BaseModel):
+    allocation_date: date
+    # 'Tue, 08-Sep-2026' — legacy's formatDisplayDate_() form.
     date_display: str
+    sector_name: str
+    party_name: str
     priority: str
-    sector: str
     purity: str
-    previous_requirement: Decimal
-    today_required: Decimal
-    alloted: Decimal
-    balance: Decimal
+    previous_requirement_kg: Decimal
+    today_required_kg: Decimal
+    alloted_kg: Decimal
+    balance_kg: Decimal
+    revision_number: int
 
 
-class PeakBalanceOut(BaseModel):
-    value: Decimal
-    date_display: str
+class PeakBalance(BaseModel):
+    value_kg: Decimal
+    date_display: str | None
 
 
-class AllocationHistorySummaryOut(BaseModel):
+class AllocationHistorySummary(BaseModel):
     record_count: int
     returned_count: int
     truncated: bool
     date_count: int
     sector_count: int
-    total_previous_requirement: Decimal
-    total_today_required: Decimal
-    total_alloted: Decimal
-    total_balance: Decimal
-    peak_balance: PeakBalanceOut
-    total_demand: Decimal
-    fulfilment_rate: Decimal
+    total_previous_requirement_kg: Decimal
+    total_today_required_kg: Decimal
+    total_alloted_kg: Decimal
+    total_balance_kg: Decimal
+    total_demand_kg: Decimal
+    # alloted / (previous_requirement + today_required) * 100.
+    # 0 when demand <= 0 — a negative previous requirement means the sector was
+    # over-allocated earlier and is carrying credit.
+    fulfilment_rate: float
+    peak_balance: PeakBalance
 
 
-class AllocationHistoryOut(BaseModel):
-    rows: list[AllocationHistoryRowOut]
-    summary: AllocationHistorySummaryOut
+class PageInfo(BaseModel):
+    current_page: int
+    total_pages: int
+    page_size: int
+    offset: int
+    total_records: int
+    first_record: int
+    last_record: int
+    has_previous: bool
+    has_next: bool
+
+
+class AllocationHistoryResponse(BaseModel):
+    rows: list[AllocationHistoryRow]
+    total_rows: int
+    summary: AllocationHistorySummary
     page: PageInfo
 
 
-class FlowHistoryRowOut(BaseModel):
-    date_key: date_
-    date_display: str
-    sector: str
-    acquired: Decimal
+class FlowHistoryRow(BaseModel):
+    allocation_date: date
+    sector_name: str
+    party_name: str
+    acquired_kg: Decimal
+    revision_number: int
 
 
-class CycleComparisonOut(BaseModel):
-    previous_acquired: Decimal | None = None
-    current_acquired: Decimal | None = None
+class FlowHistoryResponse(BaseModel):
+    rows: list[FlowHistoryRow]
+    total_rows: int
+
+
+class DatePoint(BaseModel):
+    allocation_date: date
+    previous_requirement_kg: Decimal
+    today_required_kg: Decimal
+    alloted_kg: Decimal
+    balance_kg: Decimal
+    acquired_kg: Decimal
+
+
+class SectorPoint(BaseModel):
+    sector_name: str
+    priority: str
+    today_required_kg: Decimal
+    alloted_kg: Decimal
+    balance_kg: Decimal
+
+
+class PriorityPoint(BaseModel):
+    priority: str
+    today_required_kg: Decimal
+    alloted_kg: Decimal
+    balance_kg: Decimal
+
+
+class CycleDelta(BaseModel):
+    """Splits the saved dates in range down the middle and compares the newer
+    half against the older. An odd count puts the extra date in the CURRENT
+    half, which never inflates the change."""
+
+    previous_acquired_kg: Decimal
+    current_acquired_kg: Decimal
     day_count: int
-    change_percent: Decimal | None = None
+    # None below four dates, or when the older half acquired nothing — a change
+    # from zero is undefined, not infinite.
+    change_percent: float | None
 
 
-class FlowHistorySummaryOut(BaseModel):
-    record_count: int
-    returned_count: int
+class TopPendingPoint(BaseModel):
+    sector_name: str
+    priority: str
+    pending_kg: Decimal
+    as_of: date
+    as_of_display: str
+
+
+class DashboardResponse(BaseModel):
+    # --- the six KPI cards ---
+    saved_days: int
+    latest_saved_date: date | None
+    latest_saved_date_display: str | None
+    utilisation_rate: float | None
+    average_daily_acquired_kg: Decimal
+    by_date: list[DatePoint]
+    by_sector: list[SectorPoint]
+    by_priority: list[PriorityPoint]
+    total_acquired_kg: Decimal
+    total_alloted_kg: Decimal
+    total_required_kg: Decimal
+    closing_balance_kg: Decimal
+    saved_date_count: int
+    peak_closing_balance_kg: Decimal
+    peak_closing_date: date | None
+    peak_closing_date_display: str | None
+    fulfilment_rate: float | None
+    cycle: CycleDelta
+    top_pending: list[TopPendingPoint]
+    # Drives the operator-only "Your Metal Flow Trend" card. Resolved here, never
+    # taken from the browser (rule 8).
+    is_admin: bool
+    # A sector filter was asked for but not applied to the supply side, because
+    # that name has no records in the flow ledger (page spec, rule 2).
+    flow_filter_skipped: bool
+
+
+# --------------------------------------------------------------- Metal Flow
+
+
+class HeatmapDate(BaseModel):
+    date_key: date
+    short_label: str
+    full_label: str
+
+
+class HeatmapCell(BaseModel):
+    date_key: date
+    flow_sector_id: int
+    acquired_kg: Decimal
+
+
+class HeatmapSector(BaseModel):
+    flow_sector_id: int
+    sector_name: str
+    total_kg: Decimal
+
+
+class FlowSeriesSector(BaseModel):
+    sector_name: str
+    total_kg: Decimal
+    percent: float
+
+
+class FlowHeatmap(BaseModel):
+    dates: list[HeatmapDate]
+    sectors: list[HeatmapSector]
+    cells: list[HeatmapCell]
+    max_acquired_kg: Decimal
     truncated: bool
-    date_count: int
-    sector_count: int
-    total_acquired: Decimal
-    average_per_day: Decimal
-    cycle: CycleComparisonOut
-
-
-class FlowSeriesSectorOut(BaseModel):
-    sector: str
-    total: Decimal
-    percent: Decimal
-    values: list[Decimal]
-
-
-class FlowSeriesOut(BaseModel):
-    dates: list[date_]
-    displays: list[str]
-    sectors: list[FlowSeriesSectorOut]
-    grand_total: Decimal
-
-
-class HeatmapCellOut(BaseModel):
-    date_key: date_
-    date_label: str
-    full_date_label: str
-    sector: str
-    acquired: Decimal
-
-
-class HeatmapPeakOut(BaseModel):
-    acquired: Decimal = Decimal("0")
-    sector: str = ""
-    date_label: str = ""
-    full_date_label: str = ""
-
-
-class HeatmapMostActiveOut(BaseModel):
-    sector: str = ""
-    total: Decimal = Decimal("0")
-    percent: Decimal = Decimal("0")
-
-
-class HeatmapOut(BaseModel):
-    dates: list[dict]
-    sectors: list[str]
-    cells: list[HeatmapCellOut]
-    maximum_acquired: Decimal
-    record_count: int
-    total_acquired: Decimal
-    date_count: int
-    party_count: int
-    peak: HeatmapPeakOut
-    busiest_day: dict
-    most_active: HeatmapMostActiveOut
-    truncated: bool
+    truncation_note: str | None
     window_days: int
-    truncation_note: str = ""
+    peak: "FlowPeak"
+    most_active: "FlowMostActive"
+    # The highest day TOTAL. Computed and returned; the KPI card shows `peak`.
+    busiest_day_kg: Decimal
+    busiest_day_label: str | None
 
 
-class FlowHistoryOut(BaseModel):
-    rows: list[FlowHistoryRowOut]
-    summary: FlowHistorySummaryOut
-    series: FlowSeriesOut
-    heatmap: HeatmapOut
-    page: PageInfo
+class FlowPeak(BaseModel):
+    """The largest single CELL — one sector on one date — not the largest day
+    total. The day total is `busiest_day_kg`, returned but not displayed."""
+
+    acquired_kg: Decimal
+    sector_name: str | None
+    full_date_label: str | None
 
 
-class DashboardByDateOut(BaseModel):
-    date_key: date_
-    date_display: str
-    previous_requirement: Decimal
-    required: Decimal
-    alloted: Decimal
-    balance: Decimal
-    acquired: Decimal
-    unallocated: Decimal
-    utilisation: Decimal
+class FlowMostActive(BaseModel):
+    sector_name: str | None
+    total_kg: Decimal
+    percent: float
 
 
-class DashboardBySectorOut(BaseModel):
-    sector: str
-    priority: str
-    required: Decimal
-    alloted: Decimal
-    balance: Decimal
-    latest_balance: Decimal
-    latest_date_display: str
+class FlowSummary(BaseModel):
+    record_count: int
+    date_count: int
+    sector_count: int
+    total_sector_count: int
+    total_acquired_kg: Decimal
+    # totalAcquired / dateCount — dates WITH records, not calendar days.
+    average_per_day_kg: Decimal
+    cycle: CycleDelta
 
 
-class DashboardByPriorityOut(BaseModel):
-    priority: str
-    alloted: Decimal
-    required: Decimal
-    balance: Decimal
-    share: Decimal
+class FlowAnalysisResponse(BaseModel):
+    summary: FlowSummary
+    heatmap: FlowHeatmap
 
 
-class TopPendingOut(BaseModel):
-    sector: str
-    priority: str
-    pending: Decimal
-    as_of: str
-
-
-class DashboardKpisOut(BaseModel):
-    day_count: int
-    total_acquired: Decimal
-    total_alloted: Decimal
-    total_required: Decimal
-    unallocated: Decimal
-    utilisation: Decimal
-    average_daily_acquired: Decimal
-    latest_date: date_ | None
-    latest_date_display: str
-    latest_closing_balance: Decimal
-    pending_sector_count: int
-    total_pending_latest: Decimal
-    fulfilment_rate: Decimal
-    previous_cycle_acquired: Decimal
-    current_cycle_acquired: Decimal
-    acquired_change_percent: Decimal | None
-    cycle_day_count: int
-    peak_closing_balance: Decimal
-    peak_closing_date: str
-
-
-class DashboardSummaryOut(BaseModel):
-    kpis: DashboardKpisOut
-    heatmap: HeatmapOut
-    by_date: list[DashboardByDateOut]
-    by_sector: list[DashboardBySectorOut]
-    by_priority: list[DashboardByPriorityOut]
-    top_pending: list[TopPendingOut] = Field(default_factory=list)
+class NavCounts(BaseModel):
+    allocation_history: int
+    flow_history: int
+    audit: int

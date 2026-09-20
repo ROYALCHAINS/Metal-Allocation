@@ -1,22 +1,46 @@
 /**
- * api/reports.js — replaces ReportService.gs's google.script.run call
- * sites used by views/reports.js and views/dashboard.js.
+ * api/reports.js — history, dashboard and audit endpoints.
+ * Views never call fetch directly (CLAUDE.md section 3).
  */
 
-import { get, post } from './client.js';
-
-export function getHistoryFilterOptions() {
-  return get('/reports/filter-options');
+async function getJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const detail = body && body.detail;
+    throw new Error(
+      (detail && detail.message) || (typeof detail === 'string' ? detail : null) ||
+        `Request failed (${response.status})`
+    );
+  }
+  return response.json();
 }
 
-export function getAllocationHistory(filters) {
-  return post('/reports/allocation-history', filters);
+function query(params) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') search.set(key, value);
+  });
+  const text = search.toString();
+  return text ? `?${text}` : '';
 }
 
-export function getMetalFlowHistory(filters) {
-  return post('/reports/flow-history', filters);
+export function getAllocationHistory(filters = {}) {
+  return getJson(`/reports/allocation-history${query(filters)}`);
 }
 
-export function getDashboardSummary(filters) {
-  return post('/reports/dashboard', filters);
+export function getFlowHistory(filters = {}) {
+  return getJson(`/reports/flow-history${query(filters)}`);
+}
+
+export function getFlowAnalysis(filters = {}) {
+  return getJson(`/reports/flow-analysis${query(filters)}`);
+}
+
+export function getNavCounts() {
+  return getJson('/reports/counts');
+}
+
+export function getDashboard(filters = {}) {
+  return getJson(`/reports/dashboard${query(filters)}`);
 }

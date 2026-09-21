@@ -140,3 +140,72 @@ def test_inactive_account_cannot_log_in(client, db_session) -> None:
         "/auth/login", json={"email": "gone@royalchains.com", "password": "password123"}
     )
     assert response.status_code == 403
+
+
+# --------------------------------------------------------- access diagnostics
+
+PASSWORD = "correct horse battery staple"
+
+
+def test_access_diagnostics_requires_a_session(client) -> None:
+    assert client.get("/auth/access-diagnostics").status_code == 401
+
+
+def test_an_operator_may_read_their_own_diagnostics(client, db_session) -> None:
+    """The whole point: it answers "why can't I see the Audit Log?".
+
+    Gating this on admin would refuse exactly the people who need it, so a 200
+    here for a non-admin is the contract, not an oversight.
+    """
+    _create_user(db_session, email="op@royalchains.com", is_admin=False)
+    client.post("/auth/login", json={"email": "op@royalchains.com", "password": PASSWORD})
+
+    body = client.get("/auth/access-diagnostics").json()
+    assert body["email"] == "op@royalchains.com"
+    assert body["is_administrator"] is False
+    assert body["admin_denied"] is False
+    assert any("not flagged as an administrator" in line for line in body["diagnosis"])
+    # No user_flow_scope rows, so the fallback branch — never "no access".
+    assert body["flow_scope"] == "(none configured - falling back to the Party column)"
+
+
+def test_a_denied_admin_reads_the_deny_reason(client, db_session) -> None:
+    user = _create_user(db_session, email="denied@royalchains.com", is_admin=True)
+    user.admin_denied = True
+    db_session.commit()
+    client.post("/auth/login", json={"email": "denied@royalchains.com", "password": PASSWORD})
+
+    body = client.get("/auth/access-diagnostics").json()
+    assert body["is_administrator"] is False, "the deny list beats an admin grant"
+    assert body["admin_denied"] is True
+    assert any("deny list" in line for line in body["diagnosis"])
+
+
+def test_diagnostics_never_mention_another_account(client, db_session) -> None:
+    """Rule 10 regression test.
+
+    Legacy returned CONFIG.ADMIN_EMAILS and CONFIG.NON_ADMIN_EMAILS wholesale,
+    so every caller learned the whole roster. Nothing but the caller's own
+    address may appear anywhere in this response.
+    """
+    _create_user(db_session, email="admin@royalchains.com", is_admin=True)
+    _create_user(db_session, email="op@royalchains.com", is_admin=False)
+    client.post("/auth/login", json={"email": "op@royalchains.com", "password": PASSWORD})
+
+    response = client.get("/auth/access-diagnostics")
+    assert "admin@royalchains.com" not in response.text
+    assert response.json()["email"] == "op@royalchains.com"
+
+
+def test_diagnostics_accept_no_subject_parameter(client, db_session) -> None:
+    """Legacy's debugScreenFlags let an admin inspect another user. Not ported."""
+    _create_user(db_session, email="admin@royalchains.com", is_admin=True)
+    _create_user(db_session, email="op@royalchains.com", is_admin=False)
+    client.post("/auth/login", json={"email": "op@royalchains.com", "password": PASSWORD})
+
+    plain = client.get("/auth/access-diagnostics").json()
+    probed = client.get(
+        "/auth/access-diagnostics",
+        params={"email": "admin@royalchains.com", "subject": "admin@royalchains.com"},
+    ).json()
+    assert probed == plain

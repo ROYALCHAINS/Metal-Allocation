@@ -13,11 +13,12 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import AppUser
+from repository.sector_repo import get_flow_sector_names, get_party_names
 from repository.user_repo import get_user_by_email
-from routers.deps import get_current_user
-from schemas.auth import CurrentUserResponse, LoginRequest
+from routers.deps import get_current_scope, get_current_user
+from schemas.auth import AccessDiagnosticsResponse, CurrentUserResponse, LoginRequest
 from services.password_service import verify_password
-from services.scope_service import is_administrator
+from services.scope_service import UserScope, diagnose_access, is_administrator
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -57,3 +58,41 @@ def logout(request: Request) -> dict[str, bool]:
 @router.get("/me", response_model=CurrentUserResponse)
 def me(user: AppUser = Depends(get_current_user)) -> CurrentUserResponse:
     return _to_response(user)
+
+
+@router.get("/access-diagnostics", response_model=AccessDiagnosticsResponse)
+def access_diagnostics(
+    user: AppUser = Depends(get_current_user),
+    scope: UserScope = Depends(get_current_scope),
+    db: Session = Depends(get_db),
+) -> AccessDiagnosticsResponse:
+    """Why this caller's access is what it is. Ports diagnoseAdminAccess().
+
+    Gated by get_current_user, NOT require_admin: the question it answers is
+    "why can't I see the Audit Log", which only a non-administrator ever asks.
+    Gating it on admin would refuse precisely the people who need it.
+
+    It takes NO parameters. Legacy's debugScreenFlags let an administrator
+    inspect another user; that is "any other account's scope" and rule 10
+    forbids it, so the subject is always the caller.
+    """
+    diagnosis = diagnose_access(
+        user,
+        scope,
+        party_names=get_party_names(db, scope.party_ids),
+        flow_sector_names=(
+            get_flow_sector_names(db, scope.flow_sector_ids)
+            if scope.flow_sector_ids is not None
+            else []
+        ),
+    )
+    return AccessDiagnosticsResponse(
+        email=diagnosis.email,
+        display_name=diagnosis.display_name,
+        is_administrator=diagnosis.is_administrator,
+        admin_denied=diagnosis.admin_denied,
+        is_active=diagnosis.is_active,
+        parties=list(diagnosis.party_names),
+        flow_scope=diagnosis.flow_scope,
+        diagnosis=list(diagnosis.diagnosis),
+    )

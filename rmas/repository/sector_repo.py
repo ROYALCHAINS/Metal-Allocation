@@ -72,3 +72,40 @@ def get_all_party_ids(db: Session) -> list[int]:
 
 def get_party_by_key(db: Session, party_key: str) -> Party | None:
     return db.scalar(select(Party).where(Party.party_key == party_key))
+
+
+def get_party_names(db: Session, party_ids: frozenset[int]) -> list[str]:
+    """Names for a set of party ids, ordered so the output is stable.
+
+    Only ever called with the CALLER'S OWN scope — never to enumerate parties
+    the caller may not see (CLAUDE.md section 6, rule 10).
+    """
+    if not party_ids:
+        return []
+    return list(
+        db.scalars(
+            select(Party.party_name)
+            .where(Party.party_id.in_(party_ids))
+            .order_by(Party.party_name)
+        )
+    )
+
+
+def get_flow_sector_names(db: Session, flow_sector_ids: frozenset[int]) -> list[str]:
+    """Names for a set of EXPLICIT flow-sector grants.
+
+    Reached only when an operator has rows in user_flow_scope. No live account
+    does today — every user falls back to their party instead — so this is
+    written for the branch rather than exercised by it. An empty set here means
+    "the caller had no explicit grants", which is NOT the same as "no access":
+    see models/user.py's null-fallback rule.
+    """
+    if not flow_sector_ids:
+        return []
+    return list(
+        db.scalars(
+            select(FlowSector.sector_name)
+            .where(FlowSector.flow_sector_id.in_(flow_sector_ids))
+            .order_by(FlowSector.display_order)
+        )
+    )

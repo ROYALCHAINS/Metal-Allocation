@@ -28,8 +28,13 @@ from schemas.allocation import (
     SaveAllocationResponse,
     TotalsResponse,
 )
+from schemas.audit import DateRevisionSummaryResponse
 from schemas.staging import SubmissionSummaryRow
-from services.audit_report_service import format_audit_timestamp
+from services.audit_report_service import (
+    DateRevisionSummary,
+    format_audit_timestamp,
+    get_date_revision_summary,
+)
 from services.scope_service import is_administrator
 from services.staging_service import apply_staging_to_model
 from services.allocation_service import (
@@ -129,6 +134,34 @@ def _resolve_scope(db: Session, user: AppUser):
     )
 
 
+def _revision_summary_response(
+    summary: DateRevisionSummary,
+) -> DateRevisionSummaryResponse:
+    """Format the two timestamps at the boundary, as the submissions list does.
+
+    format_audit_timestamp() returns "" for an absent value and this schema
+    wants None, so each is guarded rather than passed through blindly.
+    """
+    return DateRevisionSummaryResponse(
+        revision_count=summary.revision_count,
+        latest_revision_number=summary.latest_revision_number,
+        last_revised_by=summary.last_revised_by,
+        last_revised_at_display=(
+            format_audit_timestamp(summary.last_revised_at)
+            if summary.last_revised_at
+            else None
+        ),
+        last_revision_reason=summary.last_revision_reason,
+        originally_saved_by=summary.originally_saved_by,
+        originally_saved_at_display=(
+            format_audit_timestamp(summary.originally_saved_at)
+            if summary.originally_saved_at
+            else None
+        ),
+        message=summary.message,
+    )
+
+
 @router.get("/{allocation_date}", response_model=AllocationModelResponse)
 def get_allocation_for_date(
     allocation_date: date,
@@ -156,6 +189,13 @@ def get_allocation_for_date(
     response.staged_value_count = state.staged_value_count
     response.can_submit = (
         not is_administrator(user) and not model.is_saved and not state.already_submitted
+    )
+
+    # Who committed this date is NOT restricted — legacy's getDateRevisionSummary
+    # deliberately skips its own access check, because counts, names and
+    # timestamps leak no figures. Keep this OUTSIDE the admin block below.
+    response.revision_summary = _revision_summary_response(
+        get_date_revision_summary(db, allocation_date.isoformat())
     )
 
     # Who submitted is the administrator's business alone. The summary is

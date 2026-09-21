@@ -173,15 +173,69 @@ export function renderAllocationView(container, user) {
   }
 
   /**
-   * Several notices at once, stacked in order. A load can raise two at the same
-   * time — operator submissions were loaded AND the figures were carried from an
-   * older date — and they explain different columns, so neither should hide the
-   * other. Legacy showed only one because it had a single banner element.
+   * The gold notice StylesAudit was written for (.revision-note, audit.css).
+   * Deliberately not a .banner: a revision changes how every figure on this
+   * screen should be read, and gold says that in a different voice from the
+   * blue submission notice and the amber carry-forward warning.
+   */
+  function revisionNoteHtml(innerHtml) {
+    return `<div class="revision-note"><span class="revision-note__icon">${BANNER_ICONS.locked}</span><span>${innerHtml}</span></div>`;
+  }
+
+  /**
+   * Several notices at once, stacked in order. A load can raise three at the
+   * same time — this date was revised, operator submissions were loaded, AND
+   * the figures were carried from an older date — and they explain different
+   * columns, so none should hide the others. Legacy showed only one because it
+   * had a single banner element.
    */
   function renderNotices(notices) {
     $('allocBanner').innerHTML = notices
-      .map((notice) => bannerHtml(notice.kind, notice.html))
+      .map((notice) =>
+        notice.kind === 'revision'
+          ? revisionNoteHtml(notice.html)
+          : bannerHtml(notice.kind, notice.html)
+      )
       .join('');
+  }
+
+  /**
+   * Who committed this date, and whether it has been revised since.
+   *
+   * Shown to EVERYONE, not just administrators: legacy's getDateRevisionSummary
+   * is the one function in AuditReportService.gs that deliberately skips its own
+   * access check, because it carries counts, names and timestamps but never a
+   * figure. Null when the date has no history at all, so an untouched editable
+   * date stays quiet.
+   */
+  function revisionNotice() {
+    const rs = model.revision_summary;
+    if (!rs) return null;
+    if (!rs.revision_count && !rs.originally_saved_by) return null;
+
+    const lines = [];
+    if (rs.originally_saved_by) {
+      lines.push(
+        `<div class="submission-line">Originally saved by ${escapeHtml(
+          rs.originally_saved_by
+        )}${rs.originally_saved_at_display ? ` on ${escapeHtml(rs.originally_saved_at_display)}` : ''}</div>`
+      );
+    }
+    if (rs.last_revised_by) {
+      const reason = rs.last_revision_reason
+        ? ` &mdash; ${escapeHtml(rs.last_revision_reason)}`
+        : '';
+      lines.push(
+        `<div class="submission-line">Last revised by ${escapeHtml(rs.last_revised_by)}${
+          rs.last_revised_at_display ? ` on ${escapeHtml(rs.last_revised_at_display)}` : ''
+        }${reason}</div>`
+      );
+    }
+
+    return {
+      kind: 'revision',
+      html: `<strong>${escapeHtml(rs.message)}</strong>${lines.join('')}`,
+    };
   }
 
   /**
@@ -383,7 +437,11 @@ export function renderAllocationView(container, user) {
       $('dateStatusBox').textContent = model.is_saved
         ? 'Saved — this date is locked. Use a revision to change it.'
         : 'Editable — not yet saved.';
+      // Revision first: it says where the figures being read came from, ahead
+      // of the submission call-to-action and the carry-forward warning.
       const notices = [];
+      const revision = revisionNotice();
+      if (revision) notices.push(revision);
       const submissions = submissionNotice();
       if (submissions) notices.push(submissions);
       if (model.used_fallback_source) {

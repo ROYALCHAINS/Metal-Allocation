@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from schemas.audit import DateRevisionSummaryResponse
 from schemas.staging import SubmissionSummaryRow
 
 
@@ -106,4 +107,7 @@ class AllocationModelResponse(BaseModel):
     # receives an empty list even for their own submission. Note this is a list
     # of submissions, while staged_value_count above counts fields.
     submissions: list[SubmissionSummaryRow] = Field(default_factory=list)
+    # Who committed this date and whether it has been revised. Operator-visible
+    # by design — unlike `submissions` above, this is NOT admin-only.
+    revision_summary: DateRevisionSummaryResponse | None = None
     can_submit: bool = False

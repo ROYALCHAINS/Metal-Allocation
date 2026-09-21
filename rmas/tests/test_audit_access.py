@@ -337,3 +337,24 @@ def test_filter_options_ignore_undated_entries_when_suggesting_a_range(
     assert options["max_date"] == "2026-09-01"
     # But it still counts as an entry.
     assert options["entry_count"] == 2
+
+
+def test_the_revision_summary_is_deliberately_not_admin_gated(client, db_session) -> None:
+    """The one audit-derived payload an operator IS allowed to see.
+
+    getDateRevisionSummary() is the single function in AuditReportService.gs
+    that does not call assertAuditAccess_() — its docstring says "Safe for every
+    user: returns counts and timestamps only, never snapshots". It rides on the
+    allocation response for exactly that reason, so it must NOT be added to
+    ENDPOINTS above, whose tests assert the opposite.
+    """
+    _add_user(db_session, "op@royalchains.com")
+    _login(client, "op@royalchains.com")
+
+    response = client.get("/allocations/2026-09-01")
+    assert response.status_code == 200
+
+    summary = response.json()["revision_summary"]
+    assert summary["originally_saved_by"] == "admin@royalchains.com"
+    assert summary["originally_saved_at_display"] == "01-Sep-2026 10:00:00"
+    assert summary["message"] == "This date has not been revised."

@@ -19,6 +19,10 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from sqlalchemy.orm import Session
+
+from repository import audit_repo
+from services.audit_service import ACTION_REVISE, ACTION_SAVE
 from services.validation_service import nearly_equal_g, normalize_key
 from services.weight_service import kg_to_grams
 
@@ -264,4 +268,70 @@ def format_audit_timestamp(stored: str | None) -> str:
     return (
         f"{stamp.day:02d}-{_MONTHS[stamp.month - 1]}-{stamp.year} "
         f"{stamp.hour:02d}:{stamp.minute:02d}:{stamp.second:02d}"
+    )
+
+
+# ------------------------------------------------- date revision summary
+
+
+@dataclass(frozen=True)
+class DateRevisionSummary:
+    """Who committed one allocation date, and whether it has changed since.
+
+    Timestamps are the RAW stored values; the router formats them, the same
+    division of labour already used for SubmissionSummary.submitted_at.
+    """
+
+    revision_count: int
+    latest_revision_number: int
+    last_revised_by: str | None
+    last_revised_at: str | None
+    last_revision_reason: str | None
+    originally_saved_by: str | None
+    originally_saved_at: str | None
+    message: str
+
+
+def get_date_revision_summary(db: Session, allocation_date: str) -> DateRevisionSummary:
+    """Ports getDateRevisionSummary() (AuditReportService.gs:517).
+
+    NOT ADMINISTRATOR-ONLY, and that is deliberate. This is the one function in
+    AuditReportService.gs that does not call assertAuditAccess_(); its docstring
+    says why — "Safe for every user: returns counts and timestamps only, never
+    snapshots". The caller must preserve that: see routers/allocations.py.
+
+    A note on what the two counts mean. `revision_count` is how many successful
+    revisions the date has had; `latest_revision_number` is the number carried
+    by the newest of them. Legacy reads the latter off that row rather than
+    taking MAX(revision_number) over the date, so a SAVE carrying a non-zero
+    revision number could never inflate it. Do not "simplify" this to
+    audit_repo.get_latest_revision_number() — it answers a different question.
+    """
+    rows = audit_repo.get_success_entries_for_date(db, allocation_date)
+    revisions = [row for row in rows if row.action_type == ACTION_REVISE]
+    saves = [row for row in rows if row.action_type == ACTION_SAVE]
+
+    # Rows arrive oldest-first, so the newest revision is last and the ORIGINAL
+    # save is first. Legacy sorts its two lists in opposite directions for
+    # exactly this reason (AuditReportService.gs:529-534): "originally saved by"
+    # is the FIRST save of the date, never the most recent one.
+    latest = revisions[-1] if revisions else None
+    original = saves[0] if saves else None
+
+    # A staging submission is neither a save nor a revision; it drops out of
+    # both partitions here, as it does in legacy.
+    return DateRevisionSummary(
+        revision_count=len(revisions),
+        latest_revision_number=latest.revision_number if latest else 0,
+        last_revised_by=latest.user_email if latest else None,
+        last_revised_at=latest.action_timestamp if latest else None,
+        # The FULL reason, never preview_reason() — legacy returns it whole.
+        last_revision_reason=latest.revision_reason if latest else None,
+        originally_saved_by=original.user_email if original else None,
+        originally_saved_at=original.action_timestamp if original else None,
+        message=(
+            f"This date has been revised {len(revisions)} time(s)."
+            if revisions
+            else "This date has not been revised."
+        ),
     )

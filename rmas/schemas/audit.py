@@ -130,3 +130,27 @@ class AuditEntryDetail(BaseModel):
     after_flow_totals: DiffTotals
     changed_sectors: int
     changed_flow_sectors: int
+
+
+class DateRevisionSummaryResponse(BaseModel):
+    """One allocation date's commit history, for the Daily Allocation screen.
+
+    NOT ADMINISTRATOR-ONLY, unlike everything else in this module. It rides on
+    the allocation response rather than living under /audit precisely so that
+    it keeps legacy's contract: getDateRevisionSummary() is the one function in
+    AuditReportService.gs that deliberately skips assertAuditAccess_(), because
+    it returns counts, names and timestamps only — never a snapshot.
+    """
+
+    revision_count: int
+    # The number carried by the NEWEST revision, not MAX() over the date.
+    latest_revision_number: int
+    last_revised_by: str | None
+    last_revised_at_display: str | None
+    # Full text, never the 140-character preview the audit list uses.
+    last_revision_reason: str | None
+    # The FIRST save of this date, not the most recent one.
+    originally_saved_by: str | None
+    originally_saved_at_display: str | None
+    # Legacy's own badge text, composed server-side and shown verbatim.
+    message: str

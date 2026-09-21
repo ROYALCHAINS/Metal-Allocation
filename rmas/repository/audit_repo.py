@@ -174,3 +174,36 @@ def get_entries_for_date(db: Session, allocation_date: str) -> list[MetalAllocat
             .order_by(MetalAllocationAuditLog.action_timestamp)
         )
     )
+
+
+def get_success_entries_for_date(
+    db: Session, allocation_date: str
+) -> list[MetalAllocationAuditLog]:
+    """Every SUCCESSFUL entry for one date, oldest first.
+
+    Ports the filter in getDateRevisionSummary() (AuditReportService.gs:523):
+    date plus status SUCCESS, with the action-type partition left to the caller
+    exactly as legacy does it. A failed or blocked revision attempt is invisible
+    here, which is the point — it never happened.
+
+    Deliberately not get_entries_for_date() above, which is unfiltered on status
+    and would let a FAILED_REVISION inflate the count.
+
+    The audit_row_id tie-break matters for the same reason it does in
+    query_log(): action_timestamp comes from datetime('now'), which has
+    one-second granularity, so without it "the first SAVE of this date" is not
+    a stable answer.
+    """
+    return list(
+        db.scalars(
+            select(MetalAllocationAuditLog)
+            .where(
+                MetalAllocationAuditLog.allocation_date == allocation_date,
+                MetalAllocationAuditLog.action_status == "SUCCESS",
+            )
+            .order_by(
+                MetalAllocationAuditLog.action_timestamp,
+                MetalAllocationAuditLog.audit_row_id,
+            )
+        )
+    )

@@ -12,7 +12,7 @@
  * scaling, so chart geometry never depends on float kilogram arithmetic.
  */
 
-import { formatGrams, toGrams } from '../lib/format.js';
+import { formatGrams, formatPlotKg, toGrams } from '../lib/format.js';
 
 /* --------------------------- ANALYSIS DASHBOARD ---------------------------
    Geometry below is legacy's, taken from PROMPT_analysis_dashboard.md, not
@@ -130,10 +130,38 @@ export function groupedBarChart(rows, names) {
       [row.b, 'url(#rmasBarB)', names[1]],
     ].forEach(([value, fill, name], j) => {
       const h = Math.max(0, (Math.max(0, value) / maxG) * plotH);
-      bars += `<rect fill="${fill}" x="${centre - barW + j * barW}" y="${padT + plotH - h}"
-          width="${barW - 1}" height="${h}" rx="1.5"><title>${escapeText(row.label)} — ${escapeText(
+      // Named rather than inlined so the label below can be expressed as "the
+      // centre of the rect I just drew". Legacy's own x expressions do NOT
+      // transfer: it laid the pair out differently (x = cx - barW - 1, width
+      // barW), so copying them puts every label off its bar — by 37% of the
+      // bar width once barW bottoms out at 4 on a long range.
+      const x = centre - barW + j * barW;
+      const w = barW - 1;
+      const y = padT + plotH - h;
+      bars += `<rect fill="${fill}" x="${x}" y="${y}"
+          width="${w}" height="${h}" rx="1.5"><title>${escapeText(row.label)} — ${escapeText(
             name
           )}: ${formatGrams(value)} kg</title></rect>`;
+
+      // Value above each bar, rotated upright. Rotated, a label needs only the
+      // bar's own width, which is what keeps every bar labelled even at 30+
+      // dates — legacy's answer to crowding, and why labelEvery (which thins
+      // the horizontal date ticks below) deliberately does not apply here.
+      //
+      // Guarded on h, not value: a zero bar is an ABSENT bar, and two "0"s a
+      // pixel apart would collide on the baseline over the date tick. A tiny
+      // but real bar still gets its figure.
+      //
+      // formatPlotKg returns only [-0-9.], so no escapeText is needed — unlike
+      // every other text emit in this file.
+      if (h > 0) {
+        // One const each: the anchor appears three times and must not disagree.
+        // Fixed to 0.1 because slot is non-terminating for most row counts.
+        const lx = (x + w / 2).toFixed(1);
+        const ly = (y - 5).toFixed(1);
+        bars += `<text class="chart-bar-text" x="${lx}" y="${ly}"
+          text-anchor="start" transform="rotate(-90 ${lx} ${ly})">${formatPlotKg(value)}</text>`;
+      }
     });
     if (i % labelEvery === 0) {
       bars += `<text class="chart-axis-text" x="${centre}" y="${H - padB + 18}"
@@ -210,6 +238,14 @@ export function lineChart(rows, { colour = DASH_COLOURS.balance, totals = null }
     marks += `<circle fill="${colour}" cx="${p.x}" cy="${p.y}" r="3.5"><title>${escapeText(
       p.row.label
     )}: ${formatGrams(p.row.value)} kg</title></circle>`;
+    // Value above every node, so the trend reads without hovering. Emitted
+    // AFTER the circle: SVG paints in document order, and the 2px stroke would
+    // otherwise sit on top of the digits.
+    //
+    // Unguarded, unlike the bars above, and deliberately so: a zero here is a
+    // real reading — the balance cleared that day — not an absent mark.
+    marks += `<text class="chart-point-text" x="${p.x.toFixed(1)}" y="${(p.y - 11).toFixed(1)}"
+      text-anchor="middle">${formatPlotKg(p.row.value)}</text>`;
     if (i % labelEvery === 0) {
       marks += `<text class="chart-axis-text" x="${p.x}" y="${H - padB + 18}"
           text-anchor="middle">${escapeText(p.row.short)}</text>`;

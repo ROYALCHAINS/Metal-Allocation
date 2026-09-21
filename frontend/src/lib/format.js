@@ -46,6 +46,46 @@ export function fmt3(kgValue) {
   return formatGrams(grams === null ? 0 : grams);
 }
 
+/** Drop trailing zeros from a fixed-decimal string. Ports legacy's fmtTrim().
+ *
+ * The '.' guard is legacy's and is load-bearing: without it a whole number
+ * such as "100" would be trimmed to "1".
+ */
+function trimZeros(text) {
+  if (!text.includes('.')) return text;
+  return text.replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/**
+ * A short kilogram label for printing ON a chart, from integer grams.
+ *
+ * Ports legacy's fmt0() (Reports.html), including its reasoning: precision
+ * follows the magnitude of the figure so a genuinely small series stays
+ * readable. A party whose allocations clear almost fully each day carries a
+ * closing balance of a few hundred grams, and rounding those to whole
+ * kilograms collapses every such point to "0" — which makes the trend
+ * impossible to read on the plot. Large figures still print as whole
+ * kilograms to keep the label short.
+ *
+ * Exact three-decimal values remain in every tooltip, so this is presentation
+ * only and never affects the plotted geometry.
+ *
+ * Legacy's round3() and its sub-half-gram "-0" guard are NOT ported: the input
+ * here is already an integer number of grams, so there is nothing to round
+ * away and "-0" is unreachable.
+ */
+export function formatPlotKg(grams) {
+  const value = Math.round(Number(grams) || 0);
+  if (value === 0) return '0';
+
+  const magnitude = Math.abs(value);
+  if (magnitude >= 10000) return String(Math.round(value / 1000));
+  if (magnitude >= 1000) return trimZeros((value / 1000).toFixed(1));
+  // Below 1 kg, the same three decimals the database stores, so the label can
+  // never disagree with the tooltip beside it.
+  return trimZeros(formatGrams(value));
+}
+
 /** The balance-value CSS modifier legacy uses for the closing balance cell. */
 export function balanceClass(grams) {
   if (grams === 0) return 'balance-value balance-value--zero';

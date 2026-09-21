@@ -65,3 +65,40 @@ export async function submitRequirements(allocationDate, payload) {
   }
   return response.json();
 }
+
+/**
+ * Edit a saved date. The server recalculates every later saved date the change
+ * affects, and audits the lot as one transaction.
+ *
+ * Neither previous requirement nor balance is sent — the server derives both.
+ */
+export async function reviseAllocation(isoDate, { allocations, metalFlow, reason, requestId }) {
+  const response = await fetch(`/allocations/${isoDate}/revise`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      allocations,
+      metal_flow: metalFlow,
+      revision_reason: reason,
+      request_id: requestId,
+    }),
+  });
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+/** How much a revision would rewrite. Commits nothing. */
+export async function previewRevision(isoDate, { allocations, metalFlow, reason }) {
+  const response = await fetch(`/allocations/${isoDate}/revise/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      allocations,
+      metal_flow: metalFlow,
+      revision_reason: reason,
+      request_id: 'preview',
+    }),
+  });
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}

@@ -17,6 +17,7 @@
 
 import { AuthError, getAuditEntry, getAuditFilterOptions, getAuditLog } from '../api/audit.js';
 import { escapeHtml } from '../components/appHeader.js';
+import { actionLabel } from '../lib/auditVocabulary.js';
 import { fmt3 } from '../lib/format.js';
 
 const DASH = '—';
@@ -32,12 +33,17 @@ const BADGE_CLASS = {
   SUBMIT_REQUIREMENT: 'save',
   BLOCKED_RESUBMISSION: 'blocked',
   FAILED_SUBMISSION: 'failed',
+  // Neutral rather than the gold --revise: a cascade entry is a
+  // consequence of an administrator's edit, not another edit.
+  RECALCULATE: 'other',
 };
 
 function actionBadge(action) {
   const modifier = BADGE_CLASS[action] || 'other';
+  // The CLASS still comes from the stored value — REVISE keeps its gold badge —
+  // while the TEXT comes from the vocabulary module.
   return `<span class="audit-badge audit-badge--${modifier}">${escapeHtml(
-    String(action).replace(/_/g, ' ')
+    actionLabel(action)
   )}</span>`;
 }
 
@@ -124,7 +130,7 @@ export function renderAuditView(container, user) {
         </div>
       </div>
 
-      <div class="summary-strip" id="auKpis"></div>
+      <div class="summary-strip tile-grid" id="auKpis"></div>
 
       <div class="card panel">
         <div class="panel__head">
@@ -187,7 +193,7 @@ export function renderAuditView(container, user) {
 
   function kpi(label, value, sub, modifier) {
     return `
-      <div class="summary-stat summary-stat--${modifier}">
+      <div class="summary-stat tile summary-stat--${modifier}">
         <span class="summary-stat__label">${label}</span>
         <span class="summary-stat__value">${value}</span>
         <span class="summary-stat__sub">${sub}</span>
@@ -312,9 +318,13 @@ export function renderAuditView(container, user) {
         </table>
       </div>
       <div class="diff-legend">
-        <span><span class="legend-swatch" style="background:#fdf0d8;border:1px solid #f2ddb0"></span> Changed value</span>
-        <span><span class="legend-swatch" style="background:#e3f5ec"></span> Sector added</span>
-        <span><span class="legend-swatch" style="background:#fbe4e4"></span> Sector removed</span>
+        <!-- These read the same tokens as the .diff-table row rules in
+             theme.css, so the legend cannot drift from the rows it
+             describes. It already had: the swatch was #fdf0d8 while the
+             rule it documents uses --amber-100 (#fef3c7). -->
+        <span><span class="legend-swatch" style="background:var(--diff-changed)"></span> Changed value</span>
+        <span><span class="legend-swatch" style="background:var(--diff-added)"></span> Sector added</span>
+        <span><span class="legend-swatch" style="background:var(--diff-removed)"></span> Sector removed</span>
       </div>`;
   }
 
@@ -399,9 +409,38 @@ export function renderAuditView(container, user) {
       metaItem('User', escapeHtml(d.user_email)),
       metaItem('Timestamp', escapeHtml(d.timestamp_display || DASH)),
       metaItem('Audit ID', `<span class="audit-id">${escapeHtml(d.audit_id)}</span>`),
+      d.parent_audit_id
+        ? metaItem(
+            'Triggered by',
+            `<button type="button" class="btn--link js-audit-link"
+                     data-audit-id="${escapeHtml(d.parent_audit_id)}"
+                     title="${escapeHtml(d.parent_audit_id)}">
+               <span class="audit-id">${escapeHtml(d.parent_audit_id)}</span>
+             </button>`
+          )
+        : '',
       metaItem('Request ID', `<span class="audit-id">${escapeHtml(d.request_id || DASH)}</span>`),
       metaItem('Sectors changed', `${d.changed_sectors} allocation · ${d.changed_flow_sectors} flow`),
     ].join('');
+
+    // Which later dates this revision recalculated. The DATE is the link
+    // text and the audit id rides on the title: a sentence made of three
+    // AUD-… strings is unreadable, and the date is what a reader is after.
+    const cascaded = d.children.length
+      ? `<div class="snapshot-note">
+           This revision recalculated <strong>${d.children.length}</strong>
+           later saved date${d.children.length === 1 ? '' : 's'}: ${d.children
+             .map(
+               (child) =>
+                 `<button type="button" class="btn--link js-audit-link"
+                          data-audit-id="${escapeHtml(child.audit_id)}"
+                          title="${escapeHtml(child.audit_id)}">${escapeHtml(
+                   child.allocation_date_display || child.allocation_date || DASH
+                 )}</button>`
+             )
+             .join(', ')}.
+         </div>`
+      : '';
 
     // The FULL reason here, not the list's 140-character preview.
     const reason = d.reason
@@ -431,7 +470,19 @@ export function renderAuditView(container, user) {
       : '';
 
     $('auditModalBody').innerHTML =
-      `<div class="detail-meta">${meta}</div>${reason}${snapshotNote(d)}${allocation}${flow}`;
+      `<div class="detail-meta">${meta}</div>${cascaded}${reason}${snapshotNote(
+        d
+      )}${allocation}${flow}`;
+  }
+
+  // The table's delegated listener is bound to #auBody, which the modal is
+  // not inside — so parent/child links need their own. Bound once, to the
+  // modal body, which survives every re-render of its contents.
+  function bindModalLinks() {
+    $('auditModalBody').addEventListener('click', (event) => {
+      const link = event.target.closest('.js-audit-link');
+      if (link) openDetail(link.dataset.auditId);
+    });
   }
 
   function closeModal() {
@@ -506,12 +557,18 @@ export function renderAuditView(container, user) {
     }
   }
 
-  function fillSelect(id, values) {
+  /**
+   * The option VALUE is always the stored string — that is what the filter
+   * sends to the API. Only the visible text is relabelled, and only where a
+   * label function is supplied: this is shared with the user-email select,
+   * where the underscore rule would mangle an address.
+   */
+  function fillSelect(id, values, label = (value) => value.replace(/_/g, ' ')) {
     const select = $(id);
     values.forEach((value) => {
       const option = document.createElement('option');
       option.value = value;
-      option.textContent = value.replace(/_/g, ' ');
+      option.textContent = label(value);
       select.appendChild(option);
     });
   }
@@ -524,7 +581,7 @@ export function renderAuditView(container, user) {
   async function loadOptions() {
     try {
       options = await getAuditFilterOptions();
-      fillSelect('auAction', options.actions);
+      fillSelect('auAction', options.actions, actionLabel);
       fillSelect('auStatus', options.statuses);
       fillSelect('auUser', options.users);
       seedDates();
@@ -555,6 +612,7 @@ export function renderAuditView(container, user) {
     if (button) openDetail(button.dataset.auditId);
   });
 
+  bindModalLinks();
   $('auditModalClose').addEventListener('click', closeModal);
   $('auditModal').addEventListener('click', (event) => {
     if (event.target === $('auditModal')) closeModal();

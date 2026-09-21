@@ -18,6 +18,8 @@
 import {
   getAllocationForDate,
   newRequestId,
+  previewRevision,
+  reviseAllocation,
   saveAllocation,
   submitRequirements,
 } from '../api/allocations.js';
@@ -44,6 +46,11 @@ export function renderAllocationView(container, user) {
   const isAdmin = user.role === 'admin';
   let model = null;
   let selectedDate = todayIso();
+  // Revision mode. renderRows() computes its locks from the model, which has
+  // no mutable state to flip, so this is the flag it consults. Cleared by
+  // load(), so changing date or hitting Refresh always leaves revision mode —
+  // the same guard legacy needs.
+  let reviseMode = false;
 
   container.innerHTML = `
     <div class="card control-bar" aria-label="Allocation date selection">
@@ -64,10 +71,10 @@ export function renderAllocationView(container, user) {
       </div>
     </div>
 
-    <div class="kpi-grid" aria-label="Daily totals" id="kpiGrid">
+    <div class="kpi-grid tile-grid" aria-label="Daily totals" id="kpiGrid">
       ${KPI_ORDER.map(
         (label, i) => `
-        <div class="kpi${i === 4 ? ' kpi--primary' : ''}${i === 5 ? ' kpi--closing' : ''}">
+        <div class="kpi tile${i === 4 ? ' kpi--primary' : ''}${i === 5 ? ' kpi--closing' : ''}">
           <span class="kpi__label">${label}</span>
           <span class="kpi__value" id="kpi${i}">0.000</span>
           <span class="kpi__unit">kg</span>
@@ -136,6 +143,29 @@ export function renderAllocationView(container, user) {
       </div>
     </div>
 
+    <!-- Confirmation and revision reason. Every class here is already in the
+         ported stylesheet; the ids are namespaced so they cannot collide with
+         the Audit Log's own modal. -->
+    <div class="modal hidden" id="reviseModal" role="dialog" aria-modal="true"
+         aria-labelledby="reviseModalTitle">
+      <div class="modal__box">
+        <h3 class="modal__title" id="reviseModalTitle">Submit Revision</h3>
+        <div class="modal__body" id="reviseModalBody"></div>
+        <div class="modal__field">
+          <label class="field-label" for="reviseReason">Revision Reason (mandatory)</label>
+          <textarea id="reviseReason" class="input input--textarea" rows="3"
+                    placeholder="Explain why this saved date is being revised"></textarea>
+          <div class="inline-error hidden" id="reviseReasonError"></div>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--ghost" id="reviseModalCancel">Cancel</button>
+          <button type="button" class="btn btn--primary" id="reviseModalConfirm">
+            Submit Revision
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="page-spacer"></div>
     <div class="action-bar">
       <div class="action-bar__info">
@@ -145,6 +175,9 @@ export function renderAllocationView(container, user) {
         </div>
       </div>
       <div class="action-bar__buttons">
+        <button type="button" class="btn btn--gold hidden" id="btnAdminRevise">
+          Edit Saved Date
+        </button>
         <button type="button" class="btn btn--primary" id="btnSave" ${isAdmin ? '' : 'hidden'}>
           Save Current Data
         </button>
@@ -275,12 +308,108 @@ export function renderAllocationView(container, user) {
     };
   }
 
+  /**
+   * Enter revision mode: unlock the fields and relabel Save.
+   *
+   * Nothing is written until Submit Revision is confirmed with a reason. The
+   * button's visibility comes from the server's can_revise, never from the
+   * browser's own idea of who the user is.
+   */
+  function enterReviseMode() {
+    reviseMode = true;
+    renderRows();
+    $('dateStatusBox').textContent = 'Revision mode — editing a saved date.';
+    banner(
+      'warn',
+      'Revision mode. Edit the values, then use Submit Revision. All changes are audited.'
+    );
+    $('btnAdminRevise').classList.add('hidden');
+    $('btnSave').textContent = 'Submit Revision';
+    $('btnSave').disabled = false;
+  }
+
+  function closeReviseModal() {
+    $('reviseModal').classList.add('hidden');
+  }
+
+  /**
+   * Ask for a reason, and show what the revision will rewrite.
+   *
+   * The dialog opens immediately and fills in the cascade line when the
+   * preview resolves — a slow or failed preview must never stop an
+   * administrator from revising.
+   */
+  function openReviseModal() {
+    const payload = collect();
+    $('reviseReason').value = '';
+    $('reviseReasonError').classList.add('hidden');
+    $('reviseModalBody').innerHTML = `
+      Revise the saved allocation for <strong>${escapeHtml(
+        model.selected_date_display
+      )}</strong>.<br><br>
+      The stored records for this date will be replaced and a before-and-after
+      snapshot is written to the audit log.<br><br>
+      <span id="reviseCascadeLine">Checking which later dates are affected&hellip;</span>`;
+    $('reviseModal').classList.remove('hidden');
+
+    previewRevision(selectedDate, {
+      allocations: payload.allocations,
+      metalFlow: payload.metalFlow,
+      // The server still checks the real reason on submit; this only has to
+      // clear the length rule so the preview is not refused before it runs.
+      reason: 'Cascade preview request.',
+    })
+      .then((preview) => {
+        const line = $('reviseCascadeLine');
+        if (line) line.innerHTML = `<strong>${escapeHtml(preview.message)}</strong>`;
+      })
+      .catch(() => {
+        const line = $('reviseCascadeLine');
+        if (line) {
+          line.textContent =
+            'The number of affected later dates could not be checked. The revision can still be submitted.';
+        }
+      });
+  }
+
+  async function submitRevision(reason) {
+    const button = $('btnSave');
+    button.disabled = true;
+    button.textContent = 'Submitting revision…';
+    try {
+      const payload = collect();
+      const result = await reviseAllocation(selectedDate, {
+        allocations: payload.allocations,
+        metalFlow: payload.metalFlow,
+        reason,
+        requestId: newRequestId(),
+      });
+      const cascaded = result.cascaded_dates.length;
+      banner(
+        'success',
+        `Revision ${result.revision_number} saved for ${model.selected_date_display}.` +
+          (cascaded
+            ? ` ${cascaded} later date${cascaded === 1 ? ' was' : 's were'} recalculated.`
+            : '') +
+          ` Audit ${result.audit_id}.`
+      );
+      await load(selectedDate);
+    } catch (err) {
+      banner('error', err.message);
+      button.disabled = false;
+      button.textContent = 'Submit Revision';
+    }
+  }
+
   function renderRows() {
-    const lockAlloted = !isAdmin || model.is_saved;
+    // In revision mode an administrator edits a saved date, so the saved-date
+    // locks lift — including already_submitted, which is moot once the date
+    // has been committed.
+    const lockAlloted = !isAdmin || (model.is_saved && !reviseMode);
     // A submission cannot be changed once sent, so the operator's own inputs
     // lock the moment their party has submitted. The server decides this —
     // already_submitted is resolved from the staging table, not the browser.
-    const lockRequired = model.is_saved || model.already_submitted;
+    const lockRequired = (model.is_saved || model.already_submitted) && !reviseMode;
 
     $('allocBody').innerHTML = model.allocations.length
       ? model.allocations
@@ -416,7 +545,9 @@ export function renderAllocationView(container, user) {
     return {
       allocations: model.allocations.map((row, i) => ({
         sector_id: row.sector_id,
-        previous_requirement_kg: fmt3(row.previous_requirement_kg),
+        // previous_requirement is NOT sent: the server derives it from the
+        // source date's closing balance. It was only ever echoed back from the
+        // model, and the server used to persist whatever arrived.
         today_required_kg: container.querySelector(`.js-required[data-index="${i}"]`).value || '0',
         alloted_kg: container.querySelector(`.js-alloted[data-index="${i}"]`).value || '0',
       })),
@@ -428,6 +559,10 @@ export function renderAllocationView(container, user) {
   }
 
   async function load(isoDate) {
+    // Any reload leaves revision mode, so a stray Refresh or date change can
+    // never leave the fields unlocked against a saved date.
+    reviseMode = false;
+    $('btnSave').textContent = 'Save Current Data';
     $('dateStatusBox').textContent = 'Loading…';
     banner('', '');
     try {
@@ -453,6 +588,8 @@ export function renderAllocationView(container, user) {
         });
       }
       renderNotices(notices);
+      // Server-resolved: administrator, already saved, feature enabled.
+      $('btnAdminRevise').classList.toggle('hidden', !model.can_revise);
       $('btnSave').disabled = !isAdmin || model.is_saved;
       $('btnSubmit').disabled = !model.can_submit;
       $('btnSubmit').textContent = model.already_submitted
@@ -468,7 +605,43 @@ export function renderAllocationView(container, user) {
   $('allocationDate').addEventListener('change', (e) => load(e.target.value));
   $('btnReloadDate').addEventListener('click', () => load(selectedDate));
 
+  $('btnAdminRevise').addEventListener('click', enterReviseMode);
+  $('reviseModalCancel').addEventListener('click', closeReviseModal);
+  $('reviseModal').addEventListener('click', (event) => {
+    if (event.target === $('reviseModal')) closeReviseModal();
+  });
+
+  // Confirm deliberately does NOT close the dialog itself — a reason that is
+  // too short shows the inline error and leaves the box open, which is the
+  // whole point of having one.
+  $('reviseModalConfirm').addEventListener('click', () => {
+    const reason = $('reviseReason').value.trim();
+    if (reason.length < 10) {
+      $('reviseReasonError').textContent =
+        'The revision reason must be at least 10 characters.';
+      $('reviseReasonError').classList.remove('hidden');
+      return;
+    }
+    closeReviseModal();
+    submitRevision(reason);
+  });
+
+  // Self-removing, unlike legacy's bare document listener: this view is
+  // re-rendered on every nav click, and a listener per visit would stack.
+  function onEscape(event) {
+    if (!container.isConnected) {
+      document.removeEventListener('keydown', onEscape);
+      return;
+    }
+    if (event.key === 'Escape') closeReviseModal();
+  }
+  document.addEventListener('keydown', onEscape);
+
   $('btnSave').addEventListener('click', async () => {
+    if (reviseMode) {
+      openReviseModal();
+      return;
+    }
     const button = $('btnSave');
     button.disabled = true;
     button.textContent = 'Saving…';

@@ -1,0 +1,479 @@
+/* ==================================================================
+   theme.css — night mode. Loads FIFTH, after app.css.
+
+   WHAT THIS FILE IS PERMITTED TO DO, and why it differs from the others.
+
+   tokens.css, reports.css and audit.css are verbatim ports of legacy's
+   Styles/StylesReports/StylesAudit and must survive unchanged (CLAUDE.md
+   section 7). app.css states that it "does not redefine or override any
+   legacy class from the visual contract".
+
+   This file DOES override them — that is its entire job, and it is the
+   reason it exists as a separate sheet rather than as edits in place.
+   The four files above stay byte-identical; a theme is expressed here.
+   See CLAUDE.md section 7, "Theming".
+
+   TWO RULES THIS FILE KEEPS:
+     1. Every rule outside the :root light block below is either
+        [data-theme="dark"]-prefixed, or one of the four new classes
+        (.btn--on-dark, .header-actions, .tile-grid, .tile). So light
+        mode can only change where we intended it to.
+     2. No !important. The [data-theme="dark"] prefix adds (0,1,0) to
+        every selector, which is enough to beat even the ID-specificity
+        rule at reports.css:220 without reaching for it.
+
+   The palette and the three-state contract come from RMAS_PORT_LEDGER.html,
+   whose colours are this app's own tokens.css palette renamed to roles.
+   ================================================================== */
+
+/* ------------------------------------------------------------------
+   TIER A — semantic aliases. These are NEW names; nothing is renamed.
+   Every rule written in this file uses only these, never the scale
+   names. Same names RMAS_PORT_LEDGER.html uses, so the two agree.
+   ------------------------------------------------------------------ */
+:root{
+  color-scheme:light;
+
+  --ground:#f1f5f9;        /* the page itself */
+  --surface:#ffffff;       /* cards, inputs, modals */
+  --surface-2:#f8fafc;     /* inset surfaces, scrollbar track */
+  --ink-1:#0f172a;         /* headline ink */
+  --ink-2:#1e293b;         /* body ink */
+  --muted:#64748b;         /* secondary ink */
+  --faint:#94a3b8;         /* tertiary ink */
+  --line-1:#e2e8f0;        /* hairline */
+
+  /* Translucent table washes. Light values are the CURRENT literals,
+     verbatim, so rendered light output is unchanged. See the dark block
+     for why these cannot be handled by a token swap. */
+  --tint-neutral:rgba(248,250,252,.7);
+  --tint-amber:rgba(255,251,235,.3);
+  --tint-amber-hover:rgba(255,251,235,.5);
+  --tint-blue:rgba(239,246,255,.4);
+  --tint-emerald:rgba(236,253,245,.3);
+  --tint-row-total:rgba(241,245,249,.97);
+  --tint-total-slate:rgba(226,232,240,.5);
+  --tint-total-gold:rgba(253,246,231,.8);
+  --tint-total-blue:rgba(219,234,254,.5);
+  --tint-total-emerald:rgba(209,250,229,.8);
+
+  /* Gold wash — six sites in audit.css share this pair. */
+  --gold-wash:var(--gold-100);
+  --gold-wash-ink:#7a5f10;
+  --gold-wash-ink-2:#6b5410;
+  --gold-wash-line:#e8d79c;
+
+  /* Chart series. Light values are charts.js's former literals EXACTLY,
+     so light output is pixel-identical to before they moved here. */
+  --chart-acquired:#10b981;
+  --chart-alloted:#1e3a5f;
+  --chart-balance:#d97706;
+  --chart-required:#1e3a5f;
+  --chart-pending:#f59e0b;
+  /* The bar gradient fades toward the card beneath it. 0.72 is tuned to
+     a white card; on dark it has to be opaque or the bars look cut off. */
+  --chart-bar-fade:.72;
+
+  /* Heatmap ramp — THE SINGLE SOURCE. reports.css's .heat-legend__scale
+     gradient is HEAT_STOPS[1..4] exactly, and charts.js reads these same
+     five properties, so the legend can no longer drift from the cells.
+     --heat-0 is the zero case and is deliberately NOT on the ramp:
+     "nothing acquired" must stay distinguishable from "a little". */
+  --heat-0:rgb(242,244,247);
+  --heat-1:#eaf1fb;
+  --heat-2:#a8caee;
+  --heat-3:#4f8bd0;
+  --heat-4:#14345c;
+  --heat-ink-hi:#ffffff;
+  --heat-ink-lo:#1e293b;
+
+  /* Audit diff legend — shared by the inline swatches in audit.js and by
+     the row rules in audit.css, which had drifted apart. */
+  --diff-changed:var(--amber-100);
+  --diff-added:var(--green-100);
+  --diff-removed:var(--red-100);
+}
+
+/* ==================================================================
+   DARK
+   ================================================================== */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+
+  /* ----------------------------------------------------------------
+     TIER B — the neutral ramp, INVERTED IN LIGHTNESS AND PRESERVED IN
+     ORDERING. Read --white as "the lightest surface" and --slate-900 as
+     "the strongest ink": the names denote RANK, not hue.
+
+     This is what makes the job tractable rather than a 135-selector
+     rewrite. var(--white) alone has 20 consumers across the ported
+     sheets — including all five `!important` mobile card rules, which
+     no later non-important rule could otherwise beat. Every frozen rule
+     of the form {background:var(--white);color:var(--slate-900)} keeps
+     correct contrast with nothing written for it.
+
+     NOT inverted, deliberately:
+       --slate-300  used ~50/50 as border AND as light ink on the navy
+                    header chrome; inverting breaks six ink sites. The
+                    four borders that matter are overridden below.
+       --grey-400   already ~4.9:1 on the dark surface.
+       every hue    gold/navy/emerald/amber/blue/indigo/rose/purple.
+                    Colour MEANING must not shift, and the navy family
+                    is correct here because the header stays navy in
+                    both themes.
+     ---------------------------------------------------------------- */
+  --dk-surface-0:#101e30;
+  --dk-surface-1:#16283d;
+  --dk-surface-2:#1a3048;
+  --dk-line:#1e3857;
+  --dk-ink-1:#f1f5f9;
+  --dk-ink-2:#e9eff7;
+  --dk-ink-3:#cbd5e1;
+  --dk-ink-4:#b0bccd;
+  --dk-ink-5:#94a3b8;
+
+  --white:var(--dk-surface-0);
+  --grey-050:var(--dk-surface-1);
+  --grey-100:var(--dk-surface-2);
+  --grey-200:var(--dk-line);
+  --line:var(--dk-line);
+  --slate-500:var(--dk-ink-5);
+  --grey-600:var(--dk-ink-4);
+  --slate-700:var(--dk-ink-3);
+  --ink:var(--dk-ink-2);
+  --slate-900:var(--dk-ink-1);
+
+  /* 4-10% near-black is invisible on a dark ground. */
+  --shadow-sm:0 1px 2px rgba(0,0,0,.45);
+  --shadow-md:0 6px 22px rgba(0,0,0,.5);
+  --shadow-xs:0 1px 1px rgba(0,0,0,.35);
+
+  /* Tier A aliases */
+  --ground:#0b1623;
+  --surface:var(--dk-surface-0);
+  --surface-2:var(--dk-surface-1);
+  --ink-1:var(--dk-ink-1);
+  --ink-2:var(--dk-ink-2);
+  --muted:var(--dk-ink-5);
+  --faint:#64748b;
+  --line-1:var(--dk-line);
+
+  /* Tints. A token swap provably cannot fix these — they are alpha over
+     a substrate. The DIRECTION was already right (a pale wash over a
+     dark ground reads as elevation); only the MAGNITUDE was wrong:
+     rgba(248,250,252,.7) over #101e30 resolves to roughly #c9d4e2. */
+  --tint-neutral:rgba(233,239,247,.05);
+  --tint-amber:rgba(220,177,91,.10);
+  --tint-amber-hover:rgba(220,177,91,.15);
+  --tint-blue:rgba(125,170,230,.08);
+  --tint-emerald:rgba(52,211,153,.09);
+  /* OPAQUE on purpose: .totals-row td is position:sticky;bottom:0, and
+     at low alpha the scrolling rows ghost through the pinned totals.
+     That would be a functional regression, not a cosmetic one. */
+  --tint-row-total:#16283d;
+  --tint-total-slate:rgba(233,239,247,.07);
+  --tint-total-gold:rgba(220,177,91,.16);
+  --tint-total-blue:rgba(125,170,230,.12);
+  --tint-total-emerald:rgba(52,211,153,.16);
+
+  --gold-wash:rgba(220,177,91,.13);
+  --gold-wash-ink:var(--gold-300);
+  --gold-wash-ink-2:var(--gold-300);
+  --gold-wash-line:rgba(220,177,91,.32);
+
+  /* Chart series. The two #1e3a5f navies are near-invisible on a dark
+     card, so they lift to a mid blue; the rest only brighten. */
+  --chart-acquired:#34d399;
+  --chart-alloted:#7fadde;
+  --chart-balance:#fbbf24;
+  --chart-required:#7fadde;
+  --chart-pending:#fcd34d;
+  --chart-bar-fade:1;
+
+  /* Ramp INVERTED. The invariant is "more signal = more salience against
+     the ground", which is light-to-dark on a light page and dark-to-light
+     on this one. --heat-0 is the flat card surface, so an empty cell
+     recedes and the first real step lifts off it. */
+  --heat-0:#101e30;
+  --heat-1:#1f4e87;
+  --heat-2:#3a6fae;
+  --heat-3:#7fadde;
+  --heat-4:#cfe0f5;
+  /* The 0.55 threshold in flowHistory.js is unchanged — because the ramp
+     inverted, the ink meaning inverts with it automatically. */
+  --heat-ink-hi:#0b1623;
+  --heat-ink-lo:var(--dk-ink-2);
+
+  --diff-changed:rgba(220,177,91,.16);
+  --diff-added:rgba(52,211,153,.15);
+  --diff-removed:rgba(244,63,94,.16);
+}
+
+/* ==================================================================
+   DARK — overrides for colours the token swap cannot reach.
+   Grouped by why they need it, not by source file.
+   ================================================================== */
+
+/* --- 1. Page and surface literals -------------------------------- */
+/* body's background is a raw literal (tokens.css:101), not a token —
+   the single highest-value line in this file. */
+[data-theme="dark"] body{background:var(--ground);}
+/* This rule defeats color-scheme:dark for WebKit, so it needs saying. */
+[data-theme="dark"] ::-webkit-scrollbar-track{background:var(--surface-2);}
+[data-theme="dark"] .panel__head{background:var(--surface-2);}
+[data-theme="dark"] .overlay__box,
+[data-theme="dark"] .modal__box{background:var(--surface);}
+[data-theme="dark"] .banner--error,
+[data-theme="dark"] .cell-input.is-invalid{background:rgba(244,63,94,.14);}
+[data-theme="dark"] .diff-table tbody tr:nth-child(even){background:rgba(233,239,247,.04);}
+[data-theme="dark"] .diff-table .cell-before{background:rgba(233,239,247,.04);}
+
+/* --- 2. Amber "closing balance" cards ---------------------------- */
+[data-theme="dark"] .kpi--closing,
+[data-theme="dark"] .summary-stat--closing,
+[data-theme="dark"] .summary-stat--amber{
+  background:rgba(220,177,91,.10);border-color:rgba(220,177,91,.30);
+}
+[data-theme="dark"] .kpi--closing .kpi__value,
+[data-theme="dark"] .summary-stat--closing .summary-stat__value,
+[data-theme="dark"] .summary-stat--amber .summary-stat__value{color:var(--gold-300);}
+[data-theme="dark"] .kpi--closing .kpi__label,
+[data-theme="dark"] .kpi--closing .stat-unit,
+[data-theme="dark"] .kpi--closing .stat-sub{color:var(--gold-400);}
+
+/* Card 3's blue wash. (0,2,1) in tokens.css, so this is (0,3,1). */
+[data-theme="dark"] .kpi-grid > .kpi:nth-child(3){
+  background:rgba(125,170,230,.10);border-color:rgba(125,170,230,.30);
+}
+[data-theme="dark"] .kpi-grid > .kpi:nth-child(3) .kpi__label,
+[data-theme="dark"] .kpi-grid > .kpi:nth-child(3) .kpi__unit{color:#a8caee;}
+[data-theme="dark"] .kpi-grid > .kpi:nth-child(3) .kpi__value{color:#cfe0f5;}
+
+/* --- 3. The translucent table washes ----------------------------- */
+/* Hover must stay comparable to the column tints: a td paints over its
+   tr regardless of specificity, so a weaker hover vanishes on exactly
+   the two columns that matter most. */
+[data-theme="dark"] .alloc-table tbody tr:hover{background:var(--tint-amber-hover);}
+[data-theme="dark"] .history-table tbody tr:hover{background:var(--tint-amber-hover);}
+[data-theme="dark"] .alloc-table tbody td:nth-child(3){background:var(--tint-neutral);}
+[data-theme="dark"] .flow-table tbody td:nth-child(2){background:var(--tint-blue);}
+[data-theme="dark"] .alloc-table tbody td:nth-child(5){background:var(--tint-amber);}
+[data-theme="dark"] .flow-table tbody td:nth-child(3){background:var(--tint-emerald);}
+[data-theme="dark"] .totals-row td{background:var(--tint-row-total);}
+[data-theme="dark"] .alloc-table .totals-row td:nth-child(2){background:var(--tint-total-slate);}
+[data-theme="dark"] .alloc-table .totals-row td:nth-child(4){background:var(--tint-total-gold);color:var(--gold-300);}
+[data-theme="dark"] .flow-table .totals-row td:nth-child(2){background:var(--tint-total-blue);}
+[data-theme="dark"] .flow-table .totals-row td:nth-child(3){background:var(--tint-total-emerald);color:var(--emerald-300);}
+[data-theme="dark"] .alloc-table .totals-row td:nth-child(3){color:#a8caee;}
+[data-theme="dark"] .alloc-table .totals-row td:nth-child(5){color:var(--emerald-300);}
+[data-theme="dark"] .filter-bar .input,
+[data-theme="dark"] .filter-bar .select{background:var(--surface-2);}
+
+/* --- 4. Focus rings. ACCESSIBILITY, not cosmetics ---------------- */
+/* Every one of these is a navy ring that disappears against a dark
+   field, and each sets outline:none so there is no fallback. They all
+   re-point to gold — the one focus style that already survives dark
+   (tokens.css:112). */
+[data-theme="dark"] .input:focus,
+[data-theme="dark"] .select:focus,
+[data-theme="dark"] .cell-input:focus,
+[data-theme="dark"] .filter-bar .input:focus,
+[data-theme="dark"] .filter-bar .select:focus{
+  border-color:var(--gold-500);box-shadow:0 0 0 1px var(--gold-500);
+}
+[data-theme="dark"] .heat-scroll:focus-visible{outline-color:var(--gold-500);}
+/* The spinner's moving arc is the only thing that distinguishes it from
+   a static ring, and it was navy. */
+[data-theme="dark"] .spinner{border-top-color:var(--gold-500);}
+
+/* --- 5. Borders that would read too bright ----------------------- */
+/* --slate-300 is deliberately not inverted (see above); these four are
+   the sites where it is a border rather than ink. */
+[data-theme="dark"] .btn,
+[data-theme="dark"] .input,
+[data-theme="dark"] .select,
+[data-theme="dark"] .cell-input,
+[data-theme="dark"] .pager__btn{border-color:var(--dk-line);}
+[data-theme="dark"] .totals-row td{border-top-color:var(--dk-line);}
+[data-theme="dark"] .action-bar{border-top-color:var(--dk-line);}
+
+/* The one collateral of the inversion: ink on navy, not a surface. */
+[data-theme="dark"] .nav-tab:hover{color:var(--dk-ink-3);}
+
+/* --- 6. navy-100 washes ------------------------------------------ */
+/* --navy-100 is NOT inverted (it is a hue token), so its four
+   light-wash consumers are overridden individually. */
+[data-theme="dark"] .chip{background:rgba(125,170,230,.14);color:#cfe0f5;}
+[data-theme="dark"] .action-bar__remaining.is-done .action-bar__value{
+  background:rgba(125,170,230,.14);border-color:rgba(125,170,230,.32);color:#cfe0f5;
+}
+[data-theme="dark"] .diff-table tfoot td{background:var(--surface-2);}
+[data-theme="dark"] .snapshot-note{background:var(--surface-2);border-color:var(--dk-line);}
+
+/* --- 7. Gold washes ---------------------------------------------- */
+/* .access-gate__icon is on the LOGIN screen — the first thing anyone
+   sees, so this group matters more than its size suggests. */
+[data-theme="dark"] .access-gate__icon,
+[data-theme="dark"] .detail-reason,
+[data-theme="dark"] .revision-note{
+  background:var(--gold-wash);border-color:var(--gold-wash-line);color:var(--gold-wash-ink-2);
+}
+[data-theme="dark"] .access-gate__icon,
+[data-theme="dark"] .audit-badge--revise,
+[data-theme="dark"] .rev-chip,
+[data-theme="dark"] .detail-reason__label{color:var(--gold-wash-ink);}
+[data-theme="dark"] .rev-chip{background:rgba(220,177,91,.16);}
+[data-theme="dark"] .revision-note__icon,
+[data-theme="dark"] .banner__icon{background:rgba(255,255,255,.10);}
+
+/* --- 7b. Navy used as INK ----------------------------------------- */
+/* The hue tokens are deliberately never inverted, which is right where
+   navy is a BACKGROUND (the header, table heads, .btn--primary — all
+   still correct). But a dozen rules use navy as dark ink on a light
+   card, and those go almost invisible on a dark one.
+   Fixed as a group rather than one reported site at a time.
+   Navy-on-gold stays untouched: .role-pill--admin and .btn--gold:hover
+   are dark ink on a gold fill in both themes, which is correct. */
+[data-theme="dark"] .alloc-table tbody td:nth-child(5) .cell-input,
+[data-theme="dark"] .history-table .date-cell,
+[data-theme="dark"] .empty-state__title,
+[data-theme="dark"] .pager__btn,
+[data-theme="dark"] .dist-row__label,
+[data-theme="dark"] .flow-summary__row strong,
+[data-theme="dark"] .access-gate__title,
+[data-theme="dark"] .detail-meta__value,
+[data-theme="dark"] .detail-section__title,
+[data-theme="dark"] .diff-table .sector-col,
+[data-theme="dark"] .diff-table .cell-after,
+[data-theme="dark"] .diff-table tfoot td,
+[data-theme="dark"] .snapshot-note{color:var(--dk-ink-1);}
+/* .btn--link is navy text on a light card, and audit.css redefines it,
+   so both need naming. Gold reads as a link on navy. */
+[data-theme="dark"] .btn--link{color:var(--gold-400);}
+[data-theme="dark"] .btn--link:hover:not(:disabled){color:var(--gold-300);}
+
+/* --- 8. Small ink fixes ------------------------------------------ */
+[data-theme="dark"] .stat-sub--down,
+[data-theme="dark"] .summary-stat__sub--down,
+[data-theme="dark"] .summary-stat__sub--down strong,
+[data-theme="dark"] .readonly-value--negative{color:var(--red-300);}
+/* ID specificity (1,0,2) in reports.css:220 — this is (1,1,2). */
+[data-theme="dark"] #dbPendingTable tbody td:nth-child(3){color:var(--dk-ink-1);}
+/* Two of the twelve accent rails are dark navy and vanish on dark. */
+[data-theme="dark"] .summary-strip > .summary-stat:nth-child(3)::after,
+[data-theme="dark"] .summary-stat--navy::after{background:#7fadde;}
+[data-theme="dark"] .stat-dot--navy{background:#7fadde;}
+/* 12% brightening is imperceptible once the bars are already dark. */
+[data-theme="dark"] .bar-group:hover rect{filter:brightness(1.3);}
+
+/* --- 9. The heatmap legend --------------------------------------- */
+/* Was a hardcoded four-stop gradient duplicating HEAT_STOPS[1..4] in a
+   second language. Now it reads the same tokens charts.js does, so the
+   legend cannot disagree with the cells it describes. */
+.heat-legend__scale{
+  background:linear-gradient(90deg,var(--heat-1) 0%,var(--heat-2) 33%,var(--heat-3) 66%,var(--heat-4) 100%);
+}
+[data-theme="dark"] .heat-row-label{fill:var(--dk-ink-2);}
+[data-theme="dark"] .heat-col-label{fill:var(--dk-ink-4);}
+
+/* --- 10. Audit diff rows ------------------------------------------ */
+/* Shared with the inline legend swatches in audit.js, which had drifted
+   from these values (#fdf0d8 vs --amber-100 #fef3c7). */
+.diff-table td.is-changed{background:var(--diff-changed);}
+.diff-table tr.row-added td{background:var(--diff-added);}
+.diff-table tr.row-removed td{background:var(--diff-removed);}
+
+/* ==================================================================
+   NEW COMPONENTS — these apply in BOTH themes.
+   ================================================================== */
+
+/* The header is navy in both themes, so a control on it needs the same
+   treatment either way. Every existing .btn variant is a light-ground
+   button; .btn--link is navy text, invisible here. */
+.header-actions{display:flex;align-items:center;gap:16px;margin-left:auto;}
+
+.btn--on-dark{
+  background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18);
+  color:#f1f5f9;box-shadow:none;
+}
+.btn--on-dark:hover:not(:disabled){background:rgba(255,255,255,.13);color:#fff;}
+/* Focus comes from the global :focus-visible gold ring. Do NOT add a
+   navy one here. */
+
+.theme-toggle{
+  padding:0;width:28px;height:28px;min-height:28px;font-size:13px;line-height:1;
+}
+
+/* ------------------------------------------------------------------
+   TILE SLAB — the KPI/summary treatment from RMAS_PORT_LEDGER.html.
+
+   Opt-in: the markup carries `tile-grid`/`tile` ALONGSIDE the legacy
+   classes, and these compound selectors (0,2,0) beat every base rule
+   without touching the frozen files. Removing one word from five
+   templates reverts it.
+
+   The trick is that the CONTAINER is painted --line-1 with a 1px gap:
+   the gap IS the hairline. Tiles paint --surface over it, flat.
+   ------------------------------------------------------------------ */
+.tile-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:1px;background:var(--line-1);border:1px solid var(--line-1);
+  border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-md);
+}
+.kpi-grid.tile-grid,
+.summary-strip.tile-grid{gap:1px;}
+
+/* NO `background` here, deliberately. The legacy .kpi/.summary-stat rules
+   already paint var(--white) — which is the right surface in both themes
+   because the neutral ramp is inverted — and, more importantly, the solid
+   and tinted VARIANTS paint their own. Setting a background here at (0,2,0)
+   would beat .kpi--primary/--warn/--done/--error at (0,1,0) and leave
+   white-on-white: exactly the "Remaining to Allocate" card going blank. */
+.kpi.tile,
+.summary-stat.tile{
+  border:0;border-radius:0;box-shadow:none;
+  padding:18px 18px 16px;align-content:start;
+  /* Two columns so the unit can sit beside the figure rather than under
+     the label: `51.844 kg` on one line, caption beneath. */
+  display:grid;grid-template-columns:auto 1fr;gap:3px 6px;
+}
+
+/* Row 1 — the figure, and its unit alongside it.
+   `order` rather than restructuring five templates, which is also the
+   better accessibility answer: it changes visual order only (WCAG 1.3.2),
+   and label-then-value stays the better READING order for a stat card. */
+.tile > .stat-figure,
+.tile > .kpi__value,
+.tile > .summary-stat__value{order:1;grid-column:1;}
+.tile > .kpi__unit,
+.tile > .stat-unit{order:2;grid-column:2;align-self:baseline;}
+/* Row 2 — the caption, spanning both columns. */
+.tile > .stat-head,
+.tile > .kpi__label,
+.tile > .summary-stat__label{order:3;grid-column:1 / -1;}
+/* Row 3 — the sub-caption, where one exists. */
+.tile > .summary-stat__sub{order:4;grid-column:1 / -1;}
+
+.tile > .kpi__value,
+.tile > .summary-stat__value,
+.tile .stat-figure .summary-stat__value{
+  font-family:var(--mono);font-size:27px;font-weight:700;
+  letter-spacing:-.02em;line-height:1.15;margin-top:0;
+}
+.tile > .kpi__label,
+.tile > .summary-stat__label,
+.tile .stat-head .summary-stat__label{
+  font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+}
+.tile > .kpi__unit,
+.tile > .stat-unit{
+  font-size:12px;font-weight:600;line-height:1.15;margin-top:0;
+  /* Sits on the figure's baseline, not the top of its line box. */
+  align-self:end;padding-bottom:3px;
+}
+.tile > .summary-stat__sub{
+  font-size:12px;color:var(--faint);line-height:1.45;margin-top:0;
+}
+/* The 3px accent rail is kept — it carries the only categorical colour
+   these cards have — but it must sit inside the clipped slab. */
+.summary-stat.tile::after{height:3px;}

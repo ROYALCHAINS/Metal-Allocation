@@ -42,23 +42,23 @@ export function renderAllocationHistoryView(container) {
       status: true,
     })}
 
-    <div class="summary-strip">
-      <div class="summary-stat summary-stat--navy">
+    <div class="summary-strip tile-grid">
+      <div class="summary-stat tile summary-stat--navy">
         <span class="summary-stat__label">Records</span>
         <span class="summary-stat__value" id="ahStatRecords">0</span>
         <span class="summary-stat__sub" id="ahStatDates">0 dates &middot; 0 sectors</span>
       </div>
-      <div class="summary-stat summary-stat--green">
+      <div class="summary-stat tile summary-stat--green">
         <span class="summary-stat__label">Previous Requirement</span>
         <span class="summary-stat__value" id="ahStatPrev">0.000</span>
-        <span class="summary-stat__sub">kg</span>
+        <span class="stat-unit">kg</span>
       </div>
-      <div class="summary-stat summary-stat--navy">
+      <div class="summary-stat tile summary-stat--navy">
         <span class="summary-stat__label">Today&rsquo;s Required</span>
         <span class="summary-stat__value" id="ahStatRequired">0.000</span>
-        <span class="summary-stat__sub">kg</span>
+        <span class="stat-unit">kg</span>
       </div>
-      <div class="summary-stat summary-stat--green">
+      <div class="summary-stat tile summary-stat--green">
         <div class="stat-head">
           <span class="summary-stat__label">Total Alloted</span>
           <span class="stat-dot stat-dot--navy" aria-hidden="true"></span>
@@ -66,7 +66,7 @@ export function renderAllocationHistoryView(container) {
         <span class="summary-stat__value" id="ahStatAlloted">0.000</span>
         <span class="summary-stat__sub" id="ahStatFulfil">0.0% fulfilment rate</span>
       </div>
-      <div class="summary-stat summary-stat--closing summary-stat--amber">
+      <div class="summary-stat tile summary-stat--closing summary-stat--amber">
         <div class="stat-head">
           <span class="summary-stat__label">Total Balance</span>
           <span class="stat-badge">Latest</span>

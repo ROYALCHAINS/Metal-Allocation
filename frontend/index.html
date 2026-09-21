@@ -10,11 +10,28 @@
   <!-- Load order is load-bearing: Styles -> StylesReports -> StylesAudit.
        The later files are additions only and assume the tokens already exist
        (CLAUDE.md section 7). app.css holds the few rules for pages with no
-       legacy equivalent and must come last. -->
+       legacy equivalent, and theme.css — the only file permitted to override
+       the ported contract — comes last of all. -->
   <link rel="stylesheet" href="/src/styles/tokens.css">
   <link rel="stylesheet" href="/src/styles/reports.css">
   <link rel="stylesheet" href="/src/styles/audit.css">
   <link rel="stylesheet" href="/src/styles/app.css">
+  <link rel="stylesheet" href="/src/styles/theme.css">
+  <!-- Inline and NOT a module, deliberately. main.js is type="module" and
+       therefore deferred, so the light body background would paint first —
+       and bootstrap() then awaits the session check before rendering
+       anything, leaving a white page up for a whole round-trip. This is the
+       only place the theme can be set before the first paint. Sets the
+       attribute only; document.body does not exist yet. -->
+  <script>
+    (function () {
+      var KEY = 'rmas.theme', stored = null;
+      try { stored = localStorage.getItem(KEY); } catch (e) { /* private mode */ }
+      var theme = (stored === 'dark' || stored === 'light') ? stored
+        : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>

@@ -482,6 +482,37 @@ The three client modules — `Scripts.html`, `Reports.html`, `Audit.html` — sh
 state. Each is a self-contained IIFE binding to element IDs declared in `Index.html`,
 and they map cleanly onto three frontend route modules.
 
+### Theming — the one sanctioned exception (added 2026-09-21)
+
+`frontend/src/styles/theme.css` is the **only** file permitted to override the ported
+contract, and it exists so that the contract does not have to be edited. Load order is
+now `tokens` → `reports` → `audit` → `app` → `theme`.
+
+- `tokens.css`, `reports.css`, `audit.css` and `app.css` remain **byte-identical** ports.
+  A theme is expressed by overriding them from `theme.css`, never by changing them.
+  Enforce it: `git diff --exit-code` over those four must pass on any theming change.
+- Two rules `theme.css` keeps, both mechanically checkable. Every rule outside its
+  `:root` light block is either `[data-theme="dark"]`-prefixed or one of its own new
+  classes — so light mode can only change where a change was intended. And it uses no
+  `!important`: the `[data-theme="dark"]` prefix adds enough specificity on its own.
+- **The neutral scale tokens are inverted in dark mode** — `--white` resolves to the
+  darkest surface, `--slate-900` to the lightest ink. They denote **rank, not hue**, and
+  the ordering is preserved, so every existing rule of the form
+  `{background:var(--white);color:var(--slate-900)}` keeps correct contrast with nothing
+  written for it. Hue tokens (gold, navy, emerald, amber, blue, indigo, rose, purple) are
+  never inverted: colour *meaning* must not shift between themes.
+- **The heatmap ramp lives in `theme.css` as `--heat-0`…`--heat-4` and nowhere else.**
+  `reports.css`'s legend gradient and `charts.js`'s `heatColor()` both read those, so the
+  legend cannot drift from the cells it describes. The ramp runs light→dark on a light
+  page and dark→light on a dark one; the invariant is that more metal always reads as
+  more salience against the ground.
+
+**One deliberate departure from "reproduced exactly":** the KPI and summary cards were
+restyled to `RMAS_PORT_LEDGER.html`'s tile treatment in **both** themes, on an explicit
+instruction (2026-09-21). It is opt-in — the markup carries `tile-grid`/`tile` alongside
+the legacy classes and `theme.css` styles the compound selectors — so deleting one word
+from five templates reverts it.
+
 ## Session Logs
 
 Development history is recorded one folder per session under `sessions/`, not a single

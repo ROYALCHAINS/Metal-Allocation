@@ -19,12 +19,23 @@ import { formatGrams, formatPlotKg, toGrams } from '../lib/format.js';
    invented: fixed viewBox widths with generous left padding for the axis, and
    a top pad that leaves room for the chip row above the plot. */
 
+/**
+ * Series colours, as CSS custom properties rather than literals.
+ *
+ * SVG presentation attributes are parsed as CSS declarations, so `fill`,
+ * `stop-color` and inline `style` all resolve var() live — which means these
+ * re-theme with no redraw at all. It also reaches the inline legend swatches,
+ * which no stylesheet rule could have overridden without !important.
+ *
+ * The light values in theme.css are the literals that used to live here,
+ * unchanged, so light output is pixel-identical.
+ */
 const DASH_COLOURS = {
-  acquired: '#10b981',
-  alloted: '#1e3a5f',
-  balance: '#d97706',
-  required: '#1e3a5f',
-  pending: '#f59e0b',
+  acquired: 'var(--chart-acquired)',
+  alloted: 'var(--chart-alloted)',
+  balance: 'var(--chart-balance)',
+  required: 'var(--chart-required)',
+  pending: 'var(--chart-pending)',
 };
 
 /** Round an axis maximum up to something readable. Ports legacy's niceMax(). */
@@ -169,14 +180,16 @@ export function groupedBarChart(rows, names) {
     }
   });
 
+  // The fade is a variable too: .72 is tuned to fade into a WHITE card, and
+  // on a dark one the bar bases would look cut off rather than softened.
   const defs = `<defs>
       <linearGradient id="rmasBarA" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${DASH_COLOURS.acquired}" stop-opacity="1"/>
-        <stop offset="100%" stop-color="${DASH_COLOURS.acquired}" stop-opacity=".72"/>
+        <stop offset="100%" stop-color="${DASH_COLOURS.acquired}" stop-opacity="var(--chart-bar-fade)"/>
       </linearGradient>
       <linearGradient id="rmasBarB" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${DASH_COLOURS.alloted}" stop-opacity="1"/>
-        <stop offset="100%" stop-color="${DASH_COLOURS.alloted}" stop-opacity=".72"/>
+        <stop offset="100%" stop-color="${DASH_COLOURS.alloted}" stop-opacity="var(--chart-bar-fade)"/>
       </linearGradient>
     </defs>`;
 
@@ -229,7 +242,21 @@ export function lineChart(rows, { colour = DASH_COLOURS.balance, totals = null }
     row,
   }));
 
-  let marks = `<path d="${points
+  // Area fill under the line, fading toward the baseline. The gradient id has
+  // to be unique per chart: three line charts can share one page, and a
+  // duplicate id would make every one of them use the first chart's colour.
+  const fillId = `rmasArea${(lineChart.seq = (lineChart.seq || 0) + 1)}`;
+  const baselineY = padT + plotH;
+  const area =
+    `<defs><linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">` +
+    `<stop offset="0%" stop-color="${colour}" stop-opacity=".28"/>` +
+    `<stop offset="100%" stop-color="${colour}" stop-opacity="0"/>` +
+    `</linearGradient></defs>` +
+    `<path d="M${points[0].x},${baselineY} ` +
+    `${points.map((p) => `L${p.x},${p.y}`).join(' ')} ` +
+    `L${points[points.length - 1].x},${baselineY} Z" fill="url(#${fillId})" />`;
+
+  let marks = `${area}<path d="${points
     .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`)
     .join(' ')}" fill="none" stroke="${colour}" stroke-width="2"
     stroke-linejoin="round" stroke-linecap="round" />`;
@@ -335,32 +362,95 @@ export function emptyChart(message = 'No saved data in this range yet.') {
    separate cycling palette for the share bars, where colour only separates
    adjacent rows. Both are lifted from legacy's Reports.html. */
 
-const HEAT_STOPS = [
-  { t: 0.0, c: [242, 244, 247] },
-  { t: 0.15, c: [234, 241, 251] },
-  { t: 0.45, c: [168, 202, 238] },
-  { t: 0.75, c: [79, 139, 208] },
-  { t: 1.0, c: [20, 52, 92] },
-];
+/**
+ * The heatmap ramp positions. The COLOURS are not here — they live in
+ * theme.css as --heat-0 … --heat-4, which is also where reports.css's
+ * .heat-legend__scale gradient reads them from.
+ *
+ * That single-sourcing is the point. The legend used to be a hardcoded
+ * four-stop gradient duplicating these values in a second language, so the
+ * two could silently drift apart; now the legend cannot disagree with the
+ * cells it describes.
+ *
+ * --heat-0 stays off the ramp deliberately: "nothing was acquired" must be
+ * distinguishable at a glance from "a little was acquired". On light it is a
+ * flat grey; on dark it is the card surface itself, so an empty cell recedes
+ * and the first real step lifts off it.
+ */
+const HEAT_POSITIONS = [0.0, 0.15, 0.45, 0.75, 1.0];
 
+/* Cycling palette for the share bars, where colour only separates adjacent
+   rows. Two sets, because half the light palette is too dark to see on a
+   dark card — and being index-cycled, WHICH rows vanished would depend on
+   the row count. The rule for editing either: every entry must clear roughly
+   4.5:1 against the card surface it sits on. */
 const FLOW_COLORS = [
   '#14345c', '#1f4e87', '#3a6fae', '#5c8fc9', '#7fadde',
   '#a8caee', '#c2d9f2', '#8a5a08', '#b4740c', '#d19b3e',
 ];
 
+const FLOW_COLORS_DARK = [
+  '#7fadde', '#a8caee', '#5c8fc9', '#cfe0f5', '#3a6fae',
+  '#e3edf9', '#93b8e4', '#d19b3e', '#e0b968', '#b4740c',
+];
+
 /**
- * Interpolate the blue ramp. Ports heatColor().
+ * Resolved ramp colours, cached.
  *
- * Zero is deliberately the flat grey rather than the ramp's lightest stop:
- * "nothing was acquired" must be distinguishable at a glance from "a little
- * was acquired", which an almost-white blue would not be.
+ * A heatmap is ~30 columns wide by however many parties, so calling
+ * getComputedStyle per cell is not an option. The cache is invalidated by
+ * the theme-change event rather than by a timer.
+ */
+let heatCache = null;
+
+function heatStops() {
+  if (heatCache) return heatCache;
+  const styles = getComputedStyle(document.documentElement);
+  heatCache = HEAT_POSITIONS.map((t, i) => ({
+    t,
+    c: parseColor(styles.getPropertyValue(`--heat-${i}`).trim()),
+  }));
+  return heatCache;
+}
+
+/** Accepts the two forms the tokens can take: #rrggbb or rgb(r,g,b). */
+function parseColor(text) {
+  if (text.startsWith('#')) {
+    const hex = text.length === 4
+      ? text.slice(1).split('').map((c) => c + c).join('')
+      : text.slice(1);
+    return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  }
+  const parts = text.match(/\d+/g);
+  return parts ? parts.slice(0, 3).map(Number) : [0, 0, 0];
+}
+
+/** Drop the cached ramp so the next draw re-reads the tokens. */
+export function invalidateThemeCache() {
+  heatCache = null;
+}
+
+function isDark() {
+  return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+
+/**
+ * Interpolate the ramp. Ports heatColor().
+ *
+ * The ramp runs light-to-dark on a light page and dark-to-light on a dark
+ * one — the invariant being that more metal always reads as more salience
+ * against the ground, never less.
  */
 export function heatColor(t) {
-  if (!(t > 0)) return 'rgb(242,244,247)';
+  const stops = heatStops();
+  if (!(t > 0)) {
+    const zero = stops[0].c;
+    return `rgb(${zero[0]},${zero[1]},${zero[2]})`;
+  }
   const clamped = Math.min(1, t);
-  for (let i = 1; i < HEAT_STOPS.length; i += 1) {
-    const a = HEAT_STOPS[i - 1];
-    const b = HEAT_STOPS[i];
+  for (let i = 1; i < stops.length; i += 1) {
+    const a = stops[i - 1];
+    const b = stops[i];
     if (clamped <= b.t) {
       const span = b.t - a.t || 1;
       const k = (clamped - a.t) / span;
@@ -368,13 +458,14 @@ export function heatColor(t) {
       return `rgb(${mix[0]},${mix[1]},${mix[2]})`;
     }
   }
-  const last = HEAT_STOPS[HEAT_STOPS.length - 1].c;
+  const last = stops[stops.length - 1].c;
   return `rgb(${last[0]},${last[1]},${last[2]})`;
 }
 
 /** Bar colour by row index, cycling. Ports flowColor(). */
 export function flowColor(index) {
-  return FLOW_COLORS[index % FLOW_COLORS.length];
+  const palette = isDark() ? FLOW_COLORS_DARK : FLOW_COLORS;
+  return palette[index % palette.length];
 }
 
 /**

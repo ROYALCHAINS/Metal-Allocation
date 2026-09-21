@@ -4,10 +4,16 @@
  */
 
 import { getCurrentUser } from './api/auth.js';
+import { initTheme } from './lib/theme.js';
 import { renderLogin } from './views/login.js';
 import { renderDashboard } from './views/dashboard.js';
 
 const app = document.getElementById('app');
+
+// The attribute is already set by the inline script in index.html, before
+// the first paint. This registers the delegated toggle listener and the
+// OS-preference watcher.
+initTheme();
 
 function showDashboard(user) {
   renderDashboard(app, user);

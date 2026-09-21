@@ -5,13 +5,35 @@
  * (the .app-header/.brand/.header-meta block) so the header reads identically
  * to the legacy app once the Daily Allocation/Reports/Audit views are ported
  * alongside it (CLAUDE.md section 7, "UI fidelity").
+ *
+ * The theme toggle is the one addition. It sits OUTSIDE the `user ?` branch
+ * on purpose: metaHtml is empty when nobody is signed in, and login.js calls
+ * this with no arguments — a toggle inside that branch would not exist on the
+ * login screen. Its click is handled by the delegated listener in lib/theme.js,
+ * so nothing here binds anything, and no caller has to remember to.
  */
+
+import { getTheme } from '../lib/theme.js';
 
 const LOGO_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEcAAABYCAMAAACQ7hpjAAAAYFBMVEXbslPr3ditYRrn0Z3MoZjKkiavaFrBfAbkw3KTMR27g3a+gCB+BwC/jYGPJBD+/f2JGQTPlhGYOii7dQbWpjPjyIzHiAvRq6QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA5mgU6AAAAGHRSTlP////////////////////////////////gEcFnAAAELUlEQVR42q2ZbZujKgyGDSJq5xyK1tL//0838QVDACuzyzWfZtt7nzwhITBNszTN0j6fTwD90f8/DC41z6O1dpy/Lavwe8N7GN5NN03LRJywAJfWGnHW0bLl5ebns22GBn8W5HQRhxN1Y2ZbRjFOh2sqcHaaNmMBFTgUF4IuORsqq4o4MAwD6bmIK0bNKWnVg3JWPdOXuMJCUjaugzPd5DzhISQFzrD6429y8EuxJJ4vfzuuVZJyOT0Ncda4gDbyo9G4qXEf3gTxuHaO/s+FZe1sjNbwFbRyuobH9YkDX3HK5FhwenToWZoCJ9Cs0Sko5ZAeX+RsrLmRorSr5xDJPgTJuEy+vnHo8zaODnL++OkrB7+hIkkPd3KWjdPf4qCkTyroyPuup7vBwS/pRNCmZ6mIS4KAxYVri8u/b3Ei0Joyrufl/V2OdafZHyd8ruLMEAXG4/IVHOtMFNivOSyyh5M+V3EML7Ldn6XWH1rADOJ6kPOq4LhHifPyfQ1HHYFhO9vqYlmmes4ZmNo5U+BU+RM2tYr0/CDnVcUxeT19LUcJDtrcEafvqzh2hNjnLV8vWlWc3eiQ9y0uwqgqjmvD6cM4qlrPnrBQFzSw/AXHnHo64qjquPSRroSTOd+/cc4+hnPzzknj0qoMcp9wNgufZVz4P4Jx13qU4HQpZ9v5ZRCEmePIl9/1CH8gnirEWnu9CZw35X2hOhV6QkFr60p1ys7lndO9+phD/3a0vNEVGqJxCUfmKzp9M2mjsgAX6/HEUSIuyI6CUdtQnOPXuiAO18NOumzOSG481015js7MgfHJDNHcu/vzEnUxQjK9yc2sonmV4kJ/RL3zsHJRmejXQU+HnJ7rcc1lVDglanEvOPIV70Nmj3I5c7S8p7w3n39EXUBZjlQTcWT/gZI7TngT5X0hTs/ims8tKK8HOt3erN67SM9ZXOCi+4paW1L2frpxXqpnek7OYQRdoGa8P4GxLnvv3usi7j8nZ5/81xvdR5s527GjvoGrTf3ZHZ2VUrN1F+8J7+Az54R8mTOu63cSxuF9A8pFcc0p7Of7HB/8+Recn9jnUO/6Fxzuz9F/fsVp034Its7nTnJMsW1897nNnBf6Jqf1Z97bzPkFN+Ni81jMUfczz/SQz332fIdqnwXn9haaQ/9ZOXIOd59bkblZxXp6Of8cezFzvEdn2cg4PtVzRpYdXMKHUC6bo/rMnHle+oqKnAHpc+aeEsq+NG+iZOMu+mr6BJGb7ug96LgXHHXRb3pkks+BAcQbLXZaA+ccHji9Jz3JZmEvR4Bj+fqA57ZTCGiTOrEP93tc5jjnj1mg6bV9Vka3LJF8riM97/zmxbM4/xZ5eMbi8hccuwch3w+NS/uPp7jaYjHR0R6/+rXsgOY+e7+9A9jiHxfsiK7QXxFgfWBnHxwV+Uz3lD/TRVKi2rROvAAAAABJRU5ErkJggg==';
 
 /**
  * @param {{ user?: { display_name: string, email: string, role: 'admin' | 'operator' } }} [opts]
  */
+/**
+ * The label stays fixed and aria-pressed carries the state. Swapping both
+ * double-encodes it — a screen reader would announce the change twice.
+ */
+function themeToggleHtml() {
+  const dark = getTheme() === 'dark';
+  return `
+        <button type="button" class="btn btn--tiny btn--on-dark theme-toggle" id="themeToggle"
+                aria-label="Dark theme" aria-pressed="${dark}"
+                title="${dark ? 'Switch to light theme' : 'Switch to dark theme'}">
+          <span class="theme-toggle__glyph" aria-hidden="true">${dark ? '☀' : '☾'}</span>
+        </button>`;
+}
+
 export function renderAppHeader(opts = {}) {
   const user = opts.user || null;
 
@@ -31,7 +53,7 @@ export function renderAppHeader(opts = {}) {
             ${user.role === 'admin' ? 'Admin' : 'Operator'}
           </span>
         </div>
-        <button type="button" class="btn btn--tiny" id="signOutBtn">Sign out</button>
+        <button type="button" class="btn btn--tiny btn--on-dark" id="signOutBtn">Sign out</button>
       </div>`
     : '';
 
@@ -44,7 +66,10 @@ export function renderAppHeader(opts = {}) {
             <div class="brand__title">Royal Metal Allocation System</div>
           </div>
         </div>
-        ${metaHtml}
+        <div class="header-actions">
+          ${themeToggleHtml()}
+          ${metaHtml}
+        </div>
       </div>
     </header>
   `;

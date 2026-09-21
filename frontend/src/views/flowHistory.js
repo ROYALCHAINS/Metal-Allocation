@@ -21,7 +21,12 @@
 import { getFlowAnalysis } from '../api/reports.js';
 import { getSectors } from '../api/sectors.js';
 import { escapeHtml } from '../components/appHeader.js';
-import { emptyChart, flowShareChart, heatColor } from '../components/charts.js';
+import {
+  emptyChart,
+  flowShareChart,
+  heatColor,
+  invalidateThemeCache,
+} from '../components/charts.js';
 import { bindFilterBar, renderFilterBar } from '../components/filterBar.js';
 import { fmt3, toGrams } from '../lib/format.js';
 
@@ -29,13 +34,23 @@ import { fmt3, toGrams } from '../lib/format.js';
 // regardless of name length. Sized to the enlarged type in app.css — the cell
 // must hold "00.000" at 11.5px monospace without touching its edges, so the
 // two must be changed together.
-const CELL_W = 46;
-const CELL_H = 30;
+const CELL_W = 64;
+const CELL_H = 32;
+// Gutter between columns. The rect is inset by this on each side, so a wider
+// gutter reads as space BETWEEN dates rather than as a thinner cell.
+const CELL_GAP = 4;
 const LABEL_W = 156;
 const HEAD_H = 26;
 
-/** Cell text flips to white once the blue is dark enough to swallow ink. */
-const cellInk = (t) => (t > 0.55 ? '#ffffff' : 'var(--ink)');
+/**
+ * Cell text flips once the fill is strong enough to swallow ink.
+ *
+ * The 0.55 threshold is unchanged from the light-only version and does not
+ * need a dark counterpart: the ramp itself inverts between themes, so the
+ * ink meaning inverts along with it. Both branches are tokens now — this
+ * used to mix a literal with a var(), which would have themed inconsistently.
+ */
+const cellInk = (t) => (t > 0.55 ? 'var(--heat-ink-hi)' : 'var(--heat-ink-lo)');
 
 export function renderFlowHistoryView(container) {
   container.innerHTML = `
@@ -44,13 +59,13 @@ export function renderFlowHistoryView(container) {
       sectorLabel: 'Party',
     })}
 
-    <div class="summary-strip">
-      <div class="summary-stat summary-stat--navy">
+    <div class="summary-strip tile-grid">
+      <div class="summary-stat tile summary-stat--navy">
         <span class="summary-stat__label">Records</span>
         <span class="summary-stat__value" id="mfStatRecords">0</span>
         <span class="summary-stat__sub" id="mfStatDates">0 dates</span>
       </div>
-      <div class="summary-stat summary-stat--green">
+      <div class="summary-stat tile summary-stat--green">
         <div class="stat-head">
           <span class="summary-stat__label">Total Acquired</span>
           <span class="stat-dot stat-dot--emerald" aria-hidden="true"></span>
@@ -58,22 +73,22 @@ export function renderFlowHistoryView(container) {
         <span class="summary-stat__value" id="mfStatTotal">0.000</span>
         <span class="summary-stat__sub" id="mfStatTotalSub">kg acquired in range</span>
       </div>
-      <div class="summary-stat summary-stat--indigo">
+      <div class="summary-stat tile summary-stat--indigo">
         <span class="summary-stat__label">Highest Single Day</span>
         <span class="summary-stat__value" id="mfHeatPeak">0.000</span>
         <span class="summary-stat__sub" id="mfHeatPeakSub">&mdash;</span>
       </div>
-      <div class="summary-stat summary-stat--navy">
+      <div class="summary-stat tile summary-stat--navy">
         <span class="summary-stat__label">Most Active Party</span>
         <span class="summary-stat__value summary-stat__value--text" id="mfHeatTop">&mdash;</span>
         <span class="summary-stat__sub" id="mfHeatTopSub">&mdash;</span>
       </div>
-      <div class="summary-stat summary-stat--emerald">
+      <div class="summary-stat tile summary-stat--emerald">
         <span class="summary-stat__label">Average per Day</span>
         <span class="summary-stat__value" id="mfStatAvg">0.000</span>
-        <span class="summary-stat__sub">kg</span>
+        <span class="stat-unit">kg</span>
       </div>
-      <div class="summary-stat summary-stat--rose">
+      <div class="summary-stat tile summary-stat--rose">
         <span class="summary-stat__label">Parties Covered</span>
         <span class="summary-stat__value" id="mfStatSectors">0</span>
         <span class="summary-stat__sub" id="mfStatSectorsSub">of 0</span>
@@ -171,8 +186,8 @@ export function renderFlowHistoryView(container) {
         const grams = toGrams(kg) || 0;
         const t = maxG > 0 ? grams / maxG : 0;
         const x = LABEL_W + i * CELL_W;
-        svg += `<rect x="${x + 1}" y="${y + 1}" width="${CELL_W - 2}" height="${CELL_H - 2}"
-            rx="2" fill="${heatColor(t)}"><title>${escapeHtml(s.sector_name)} — ${escapeHtml(
+        svg += `<rect x="${x + CELL_GAP / 2}" y="${y + 2}" width="${CELL_W - CELL_GAP}" height="${CELL_H - 4}"
+            rx="3" fill="${heatColor(t)}"><title>${escapeHtml(s.sector_name)} — ${escapeHtml(
               d.full_label
             )}: ${fmt3(kg)} kg</title></rect>`;
         if (grams > 0) {
@@ -267,6 +282,13 @@ export function renderFlowHistoryView(container) {
       // A failed dropdown must not stop the analysis loading.
     }
   }
+
+  // The heatmap bakes resolved colours into SVG attributes at draw time, so
+  // unlike the var()-driven charts it has to be redrawn when the theme flips.
+  window.addEventListener('rmas:themechange', () => {
+    invalidateThemeCache();
+    load();
+  });
 
   loadSectors();
   load();

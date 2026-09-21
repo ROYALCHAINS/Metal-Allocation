@@ -37,7 +37,7 @@ const shortDate = (iso) => (iso ? iso.slice(5) : '—');
 export function renderAnalysisView(container) {
   container.innerHTML = `
     ${renderFilterBar({ prefix: 'db' })}
-    <div class="summary-strip" id="dbKpis"></div>
+    <div class="summary-strip tile-grid" id="dbKpis"></div>
 
     <div class="chart-grid">
       <div class="chart-card chart-card--full">
@@ -145,7 +145,7 @@ export function renderAnalysisView(container) {
         : `<span class="summary-stat__label">${label}</span>`;
 
     return `
-      <div class="summary-stat summary-stat--${modifier}">
+      <div class="summary-stat tile summary-stat--${modifier}">
         ${head}
         <span class="summary-stat__value">${escapeHtml(value)}</span>${
           unit ? `<span class="stat-unit"> ${unit}</span>` : ''
@@ -337,7 +337,7 @@ export function renderAnalysisView(container) {
         }`;
         // Acquired IS a flow, so unlike the balance above it sums meaningfully.
         $('dbChartFlowTrend').innerHTML = lineChart(points, {
-          colour: '#10b981',
+          colour: 'var(--chart-acquired)',
           totals: [{ label: 'Total acquired', value: totalG }],
         });
       }

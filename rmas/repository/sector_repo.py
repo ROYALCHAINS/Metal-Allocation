@@ -109,3 +109,14 @@ def get_flow_sector_names(db: Session, flow_sector_ids: frozenset[int]) -> list[
             .order_by(FlowSector.display_order)
         )
     )
+
+
+def get_all_sectors(db: Session) -> list[Sector]:
+    """Every allocation sector, UNSCOPED.
+
+    For naming rows in an audit snapshot and for the forward cascade, both of
+    which describe the ledger rather than one user's view of it. Scope decides
+    what a person may SEE; it must not decide what a historical record says or
+    which rows a recalculation corrects.
+    """
+    return list(db.scalars(select(Sector).order_by(Sector.display_order, Sector.sector_id)))

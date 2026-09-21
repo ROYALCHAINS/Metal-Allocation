@@ -378,6 +378,16 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
       the date window. With `schema.sql`'s NOT NULL, no such row could be written at
       all, so the rule was unreachable and the log could not record the very failures
       it exists for. The date filter in `audit_repo` spares undated rows.
+    - `metal_allocation_audit_log.parent_audit_id` — **added**, and `action_type`
+      **widened again** to admit `RECALCULATE` (migration `0005`, 2026-09-22).
+      `schema.sql` predates the forward cascade, which writes one audit entry per
+      later date it recomputes, each linked to the `REVISE` entry that caused it.
+      Deliberately not a foreign key, matching `request_id`: nothing turns on
+      `PRAGMA foreign_keys`, so a self-FK would be declarative only — and would
+      quietly start being enforced the day somebody enabled it, on a table whose
+      triggers forbid deleting anything. `RECALCULATE` is a separate value from
+      `REVISE` on purpose: the Revisions KPI counts administrator edits, and a
+      cascade is a consequence of one, not another edit.
     - `metal_requirement_staging.status` — **changed** from `'PENDING'` to legacy's
       `STAGING_STATUS` vocabulary (`SUBMITTED`/`CONSUMED`, now CHECK-constrained).
       `markStagingConsumed_()` only ever matches `SUBMITTED` rows, so `PENDING` rows

@@ -35,6 +35,10 @@ AUDIT_ACTION_TYPES = (
     "SUBMIT_REQUIREMENT",
     "BLOCKED_RESUBMISSION",
     "FAILED_SUBMISSION",
+    # A later date whose previous_requirement and balance were recomputed as a
+    # CONSEQUENCE of revising an earlier date. Not an administrator edit, which
+    # is why it is a separate value: the Revisions KPI counts REVISE alone.
+    "RECALCULATE",
 )
 
 AUDIT_STATUSES = ("SUCCESS", "BLOCKED", "FAILED")
@@ -83,3 +87,12 @@ class MetalAllocationAuditLog(Base):
     updated_metal_flow_data: Mapped[str | None] = mapped_column(String, nullable=True)
 
     request_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # The REVISE entry that caused this RECALCULATE entry. NULL on every other
+    # row. A DEPARTURE from schema.sql, which predates the forward cascade.
+    #
+    # Deliberately NOT a foreign key, matching request_id above. Nothing in this
+    # application turns on PRAGMA foreign_keys, so a self-FK would be
+    # declarative only — and would quietly start being enforced the day someone
+    # enabled it, on a table whose triggers forbid deleting anything anyway.
+    parent_audit_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

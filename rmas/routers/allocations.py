@@ -23,13 +23,19 @@ from routers.deps import get_current_user
 from schemas.allocation import (
     AllocationModelResponse,
     AllocationRowResponse,
+    CascadePreviewResponse,
+    CascadedDateResponse,
     FlowRowResponse,
+    ReviseAllocationRequest,
+    ReviseAllocationResponse,
     SaveAllocationRequest,
     SaveAllocationResponse,
     TotalsResponse,
 )
 from schemas.audit import DateRevisionSummaryResponse
 from schemas.staging import SubmissionSummaryRow
+from rules.business_rules import business_rules
+from services.date_service import format_display_date
 from services.audit_report_service import (
     DateRevisionSummary,
     format_audit_timestamp,
@@ -39,13 +45,19 @@ from services.scope_service import is_administrator
 from services.staging_service import apply_staging_to_model
 from services.allocation_service import (
     AllocationModel,
+    CascadePreview,
     build_allocation_model,
+    preview_revision,
+    revise_daily_allocation,
     save_daily_allocation,
 )
 from services.exceptions import (
     DateAlreadySavedError,
+    DateNotSavedError,
     DuplicateRequestError,
     NotAuthorizedError,
+    RevisionDisabledError,
+    RevisionFailedError,
     RmasError,
     ScopeError,
     ValidationError,
@@ -64,6 +76,9 @@ _STATUS_BY_ERROR = {
     ScopeError: 403,
     DuplicateRequestError: 409,
     DateAlreadySavedError: 409,
+    RevisionDisabledError: 403,
+    DateNotSavedError: 409,
+    RevisionFailedError: 409,
 }
 
 
@@ -190,6 +205,10 @@ def get_allocation_for_date(
     response.can_submit = (
         not is_administrator(user) and not model.is_saved and not state.already_submitted
     )
+    # A saved date is immutable except through the revision path.
+    response.can_revise = (
+        is_administrator(user) and model.is_saved and business_rules.allow_admin_revision
+    )
 
     # Who committed this date is NOT restricted — legacy's getDateRevisionSummary
     # deliberately skips its own access check, because counts, names and
@@ -252,4 +271,114 @@ def save_allocation_for_date(
         audit_id=result.audit_id,
         request_id=result.request_id,
         totals=_totals_response(result.totals),
+    )
+
+
+def _cascade_message(preview: CascadePreview) -> str:
+    """One sentence for the confirmation dialog, composed here so the browser
+    prints it verbatim rather than assembling plurals of its own.
+
+    At zero the negative-balance sentence is omitted entirely — "0 dates will
+    end with a negative balance" is noise, not information. Negative balances
+    are permitted (BLOCK_OVER_ALLOCATION is off), so this reports them; it
+    never warns about them.
+    """
+    if preview.date_count == 0:
+        return "No later saved dates are affected by this revision."
+
+    dates = "1 later saved date" if preview.date_count == 1 else f"{preview.date_count} later saved dates"
+    sectors = "1 sector" if preview.sector_count == 1 else f"{preview.sector_count} sectors"
+    message = f"This revision will recalculate {dates} across {sectors}."
+
+    negative = len(preview.negative_balance_dates)
+    if negative:
+        which = "1 of those dates" if negative == 1 else f"{negative} of those dates"
+        verb = "will end" if negative == 1 else "will end"
+        message += f" {which} {verb} with a negative balance."
+    return message
+
+
+@router.post("/{allocation_date}/revise/preview", response_model=CascadePreviewResponse)
+def preview_revision_for_date(
+    allocation_date: date,
+    payload: ReviseAllocationRequest,
+    user: AppUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CascadePreviewResponse:
+    """How many later dates a revision would rewrite. Commits nothing.
+
+    Runs the same guards the commit does, so the confirmation dialog can never
+    show a preview for a request the commit would refuse.
+    """
+    try:
+        preview = preview_revision(
+            db,
+            user=user,
+            scope=_resolve_scope(db, user),
+            selected=allocation_date,
+            submitted_allocations=payload.allocations,
+            submitted_flow=payload.metal_flow,
+            revision_reason=payload.revision_reason,
+        )
+    except RmasError as exc:
+        raise _http_error(exc) from exc
+
+    return CascadePreviewResponse(
+        date_count=preview.date_count,
+        sector_count=preview.sector_count,
+        negative_balance_dates=preview.negative_balance_dates,
+        message=_cascade_message(preview),
+    )
+
+
+@router.post("/{allocation_date}/revise", response_model=ReviseAllocationResponse)
+def revise_allocation_for_date(
+    allocation_date: date,
+    payload: ReviseAllocationRequest,
+    user: AppUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReviseAllocationResponse:
+    """Edit a saved date, carrying the change forward through every later one.
+
+    Administrators only, checked on the server — the browser's button is
+    convenience, never protection. An unauthorised attempt is recorded.
+
+    NOT gated with Depends(require_admin), deliberately: that raises before the
+    handler runs, so there would be no session in which to write the
+    UNAUTHORIZED_REVISION entry rule 14 asks for. The service raises instead,
+    exactly as the save path does.
+    """
+    try:
+        result = revise_daily_allocation(
+            db,
+            user=user,
+            scope=_resolve_scope(db, user),
+            selected=allocation_date,
+            submitted_allocations=payload.allocations,
+            submitted_flow=payload.metal_flow,
+            revision_reason=payload.revision_reason,
+            request_id=payload.request_id,
+        )
+    except RmasError as exc:
+        raise _http_error(exc) from exc
+
+    return ReviseAllocationResponse(
+        allocation_date=result.allocation_date,
+        revision_number=result.revision_number,
+        allocation_records=result.allocation_records,
+        flow_records=result.flow_records,
+        audit_id=result.audit_id,
+        request_id=result.request_id,
+        totals=_totals_response(result.totals),
+        cascaded_dates=[
+            CascadedDateResponse(
+                allocation_date=entry.allocation_date,
+                allocation_date_display=format_display_date(entry.allocation_date),
+                audit_id=entry.audit_id,
+                sectors_changed=entry.sectors_changed,
+                negative_balance_sectors=entry.negative_balance_sectors,
+            )
+            for entry in result.cascaded
+        ],
+        cascade_audit_ids=[entry.audit_id for entry in result.cascaded],
     )

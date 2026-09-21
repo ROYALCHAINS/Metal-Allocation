@@ -18,7 +18,7 @@ transaction being decided.
 
 import json
 import logging
-import random
+import secrets
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -45,6 +45,10 @@ ACTION_UNAUTHORIZED_REVISION = "UNAUTHORIZED_REVISION"
 ACTION_SUBMIT_REQUIREMENT = "SUBMIT_REQUIREMENT"
 ACTION_BLOCKED_RESUBMISSION = "BLOCKED_RESUBMISSION"
 ACTION_FAILED_SUBMISSION = "FAILED_SUBMISSION"
+# A later date recomputed as a consequence of a revision. Deliberately NOT
+# REVISE: the Revisions KPI counts administrator edits, and a cascade is a
+# consequence of one, not another edit.
+ACTION_RECALCULATE = "RECALCULATE"
 
 STATUS_SUCCESS = "SUCCESS"
 STATUS_BLOCKED = "BLOCKED"
@@ -52,9 +56,34 @@ STATUS_FAILED = "FAILED"
 
 
 def generate_audit_id() -> str:
-    """Ports generateAuditId_(): 'AUD-yyyyMMdd-HHmmss-NNNN'."""
+    """Ports generateAuditId_(): 'AUD-yyyyMMdd-HHmmss-XXXXXXXX'.
+
+    WIDER THAN LEGACY, deliberately. Legacy used four decimal digits — 9000
+    values — against a one-second timestamp. That was fine when one request
+    wrote one entry, but the forward cascade writes N entries inside a single
+    second: at 30 entries the birthday collision probability is about 4.7%, and
+    audit_id is UNIQUE, so one collision aborts the entire transaction — the
+    ledger writes with it. Eight hex characters take that to about 4e-7.
+
+    Nothing parses the trailing segment, and the prefix and separator count are
+    unchanged, so ids still sort by time.
+    """
     stamp = datetime.now(ZoneInfo(APP_TIMEZONE)).strftime("%Y%m%d-%H%M%S")
-    return f"AUD-{stamp}-{random.randint(1000, 9999)}"
+    return f"AUD-{stamp}-{secrets.token_hex(4).upper()}"
+
+
+def generate_audit_ids(count: int) -> list[str]:
+    """`count` ids guaranteed distinct FROM ONE ANOTHER.
+
+    generate_audit_id() makes a collision unlikely; this makes it impossible
+    within one cascade, which is the only collision class under our control.
+    The revision path allocates every id it will need before writing anything,
+    so a failure part-way through still has the parent id to record against.
+    """
+    ids: set[str] = set()
+    while len(ids) < count:
+        ids.add(generate_audit_id())
+    return sorted(ids)
 
 
 def _kg_text(grams: int) -> str:
@@ -105,12 +134,17 @@ class AuditEntry:
     previous_metal_flow_data: str | None = None
     updated_metal_flow_data: str | None = None
     request_id: str | None = None
+    # Pre-allocated by the caller when it needs the id before the write — the
+    # revision path does, so its failure branches can reference the entry.
+    audit_id: str | None = None
+    # Set on a RECALCULATE entry: the REVISE entry that caused it.
+    parent_audit_id: str | None = None
 
 
 def write_entry(db: Session, entry: AuditEntry) -> str:
     """Append one audit row and return its audit_id."""
     row = MetalAllocationAuditLog(
-        audit_id=generate_audit_id(),
+        audit_id=entry.audit_id or generate_audit_id(),
         allocation_date=entry.allocation_date,
         action_type=entry.action_type,
         action_status=entry.action_status,
@@ -122,6 +156,7 @@ def write_entry(db: Session, entry: AuditEntry) -> str:
         previous_metal_flow_data=entry.previous_metal_flow_data,
         updated_metal_flow_data=entry.updated_metal_flow_data,
         request_id=entry.request_id,
+        parent_audit_id=entry.parent_audit_id,
     )
     audit_repo.insert_entry(db, row)
     return row.audit_id

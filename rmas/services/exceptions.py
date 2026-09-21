@@ -42,3 +42,15 @@ class DateAlreadySavedError(RmasError):
 
 class LockTimeoutError(RmasError):
     """Another write holds the per-date lock. Maps to HTTP 409."""
+
+
+class RevisionDisabledError(RmasError):
+    """ALLOW_ADMIN_REVISION is off; saved dates are immutable. Maps to HTTP 403."""
+
+
+class DateNotSavedError(RmasError):
+    """There is nothing to revise on this date. Maps to HTTP 409."""
+
+
+class RevisionFailedError(RmasError):
+    """The revision could not be completed; nothing was changed. Maps to HTTP 409."""

@@ -10,7 +10,7 @@ the full state of every sector.
 
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AuditFilterOptions(BaseModel):
@@ -130,6 +130,18 @@ class AuditEntryDetail(BaseModel):
     after_flow_totals: DiffTotals
     changed_sectors: int
     changed_flow_sectors: int
+    # Set on a RECALCULATE entry: the revision that caused it.
+    parent_audit_id: str | None = None
+    # Set on a REVISE entry: the later dates it recalculated.
+    children: list[AuditChildRef] = Field(default_factory=list)
+
+
+class AuditChildRef(BaseModel):
+    """One cascade entry, as referenced from its parent's detail view."""
+
+    audit_id: str
+    allocation_date: str | None
+    allocation_date_display: str | None
 
 
 class DateRevisionSummaryResponse(BaseModel):

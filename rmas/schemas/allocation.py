@@ -57,7 +57,12 @@ class AllocationRowInput(BaseModel):
     """
 
     sector_id: int
-    previous_requirement_kg: Decimal
+    # ACCEPTED BUT IGNORED. The server derives the previous requirement from the
+    # source date's closing balance; it is read-only on screen, but the server
+    # used to persist whatever the request carried. Kept optional rather than
+    # removed so a browser tab loaded before this change still posts
+    # successfully; delete it once the frontend has shipped.
+    previous_requirement_kg: Decimal | None = None
     today_required_kg: Decimal
     alloted_kg: Decimal
 
@@ -111,3 +116,61 @@ class AllocationModelResponse(BaseModel):
     # by design — unlike `submissions` above, this is NOT admin-only.
     revision_summary: DateRevisionSummaryResponse | None = None
     can_submit: bool = False
+    # True only for an administrator, on a date that is already saved, while
+    # ALLOW_ADMIN_REVISION is on. Resolved on the server every request.
+    can_revise: bool = False
+
+
+class ReviseRowInput(BaseModel):
+    """One revised allocation row.
+
+    NEITHER previous_requirement NOR balance is accepted. The server derives
+    both — the previous requirement from the source date's closing balance, the
+    balance from the formula. The admin may change Today's Required, Alloted
+    and Acquired; everything else is computed.
+    """
+
+    sector_id: int
+    today_required_kg: Decimal
+    alloted_kg: Decimal
+
+
+class ReviseAllocationRequest(BaseModel):
+    allocations: list[ReviseRowInput]
+    metal_flow: list[FlowRowInput]
+    # Mandatory, minimum 10 characters — enforced on the server, not the browser.
+    revision_reason: str
+    request_id: str
+
+
+class CascadedDateResponse(BaseModel):
+    """One later date the revision recalculated."""
+
+    allocation_date: date
+    allocation_date_display: str
+    audit_id: str
+    sectors_changed: int
+    negative_balance_sectors: int
+
+
+class ReviseAllocationResponse(BaseModel):
+    allocation_date: date
+    revision_number: int
+    allocation_records: int
+    flow_records: int
+    audit_id: str
+    request_id: str
+    totals: "TotalsResponse"
+    cascaded_dates: list[CascadedDateResponse]
+    cascade_audit_ids: list[str]
+
+
+class CascadePreviewResponse(BaseModel):
+    """What a revision would rewrite, computed without committing anything."""
+
+    date_count: int
+    sector_count: int
+    negative_balance_dates: list[date]
+    # Composed on the server so the browser prints one sentence verbatim,
+    # matching how DateRevisionSummaryResponse carries its message.
+    message: str

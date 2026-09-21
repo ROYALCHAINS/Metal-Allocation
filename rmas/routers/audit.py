@@ -24,6 +24,7 @@ from repository import audit_repo
 from routers.deps import require_admin
 from schemas.audit import (
     AuditCounts,
+    AuditChildRef,
     AuditEntryDetail,
     AuditEntryRow,
     AuditFilterOptions,
@@ -269,6 +270,15 @@ def get_audit_entry(
         after_allocation_totals=_totals(_allocation_totals(after_alloc), flow=False),
         before_flow_totals=_totals(_flow_totals(before_flow), flow=True),
         after_flow_totals=_totals(_flow_totals(after_flow), flow=True),
+        parent_audit_id=entry.parent_audit_id,
+        children=[
+            AuditChildRef(
+                audit_id=child.audit_id,
+                allocation_date=child.allocation_date,
+                allocation_date_display=_display_date(child.allocation_date),
+            )
+            for child in audit_repo.get_children(db, entry.audit_id)
+        ],
         changed_sectors=sum(1 for d in allocation_diff if d.any_change),
         changed_flow_sectors=sum(1 for d in flow_diff if d.any_change),
     )

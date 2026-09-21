@@ -207,3 +207,19 @@ def get_success_entries_for_date(
             )
         )
     )
+
+
+def get_children(db: Session, parent_audit_id: str) -> list[MetalAllocationAuditLog]:
+    """The cascade entries a revision caused, oldest date first.
+
+    Ordered by allocation_date rather than by timestamp: they are written in one
+    transaction within the same second, so the timestamp cannot separate them,
+    and the date is the order a reader wants anyway.
+    """
+    return list(
+        db.scalars(
+            select(MetalAllocationAuditLog)
+            .where(MetalAllocationAuditLog.parent_audit_id == parent_audit_id)
+            .order_by(MetalAllocationAuditLog.allocation_date)
+        )
+    )

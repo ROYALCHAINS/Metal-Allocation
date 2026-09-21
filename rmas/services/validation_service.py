@@ -238,15 +238,24 @@ def validate_and_normalize_payload(
     submitted_flow,
     allocation_defs,
     flow_defs,
+    carried_g: dict[int, int] | None = None,
 ) -> NormalizedPayload:
     """Rebuild the payload from the live sector definitions. Ports
     validateAndNormalizePayload_().
 
     SECURITY: every identifying field — sector name, party, purity, priority —
-    is taken from the DATABASE definitions, never from the client. The client
-    supplies only the three weights. Submitted rows are matched by sector id, so
-    **row order can never corrupt a save**, and a row for a sector outside the
-    caller's definitions simply has nowhere to land.
+    is taken from the DATABASE definitions, never from the client. Submitted
+    rows are matched by sector id, so **row order can never corrupt a save**,
+    and a row for a sector outside the caller's definitions simply has nowhere
+    to land.
+
+    PREVIOUS REQUIREMENT IS DERIVED, NOT ACCEPTED. `carried_g` maps sector_id
+    to the source date's closing balance; when supplied, that is what gets
+    stored and whatever the client sent is ignored entirely. The field is
+    read-only on screen, but a crafted request could previously send any value
+    and the server would persist it — it was checked for magnitude and never
+    reconciled against the source date. Both the save and the revision paths
+    now pass this.
 
     `allocation_defs`/`flow_defs` are (sector, party) pairs from
     repository/sector_repo.py, already narrowed to the caller's scope — so an
@@ -286,9 +295,13 @@ def validate_and_normalize_payload(
 
         label = sector.sector_name
         # Carried forward from the prior balance, so it may be negative.
-        previous_requirement_g = assert_signed_weight(
-            submitted.previous_requirement_kg, f"Previous Requirement ({label})"
-        )
+        if carried_g is not None:
+            # Derived. A sector with no row on the source date carries zero.
+            previous_requirement_g = carried_g.get(sector.sector_id, 0)
+        else:
+            previous_requirement_g = assert_signed_weight(
+                submitted.previous_requirement_kg, f"Previous Requirement ({label})"
+            )
         today_required_g = assert_valid_weight(
             submitted.today_required_kg, f"Today's Required Weight ({label})"
         )

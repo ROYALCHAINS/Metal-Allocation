@@ -12,8 +12,10 @@ caller asked for, exactly as in the other repositories (rule 8).
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.orm import Session
 
+from models.party import Party
 from models.sector import FlowSector, Sector
 from models.staging import MetalRequirementStaging
+from models.user import AppUser
 from services.scope_service import UserScope
 
 SUBMITTED = "SUBMITTED"
@@ -103,25 +105,54 @@ def staged_flow_values(
     return {row[0]: row[1] for row in db.execute(_apply_scope(stmt, scope))}
 
 
-def submission_summary(db: Session, allocation_date: str, scope: UserScope):
-    """Who submitted for this date and when, for the administrator's screen."""
+def submission_summary(
+    db: Session, allocation_date: str, scope: UserScope
+) -> list[tuple[str, str, str, str, int]]:
+    """Who submitted for this date and when, for the administrator's screen.
+
+    Returns (party_name, operator_name, operator_email, submitted_at, row_count)
+    per submission, earliest first.
+
+    GROUPED BY submission_id, matching legacy's key of operatorEmail + '::' +
+    submissionId (StagingService.gs:974). Today that changes nothing — the
+    one-shot rule in any_rows_for_parties() means a (date, party) can only ever
+    carry one submission — but without it a relaxed rule would silently collapse
+    two submissions into one line carrying the earlier timestamp.
+
+    The user join is OUTER and the name falls back to the email, so a submission
+    is never dropped or left unnamed because the account was deactivated or has
+    no display name. Legacy does the same at StagingService.gs:995.
+    """
+    operator_name = func.coalesce(
+        func.nullif(AppUser.display_name, ""), MetalRequirementStaging.operator_email
+    )
     stmt = (
         select(
+            Party.party_name,
+            operator_name,
             MetalRequirementStaging.operator_email,
-            MetalRequirementStaging.party_id,
             func.min(MetalRequirementStaging.submitted_at),
             func.count(),
         )
+        .join(Party, Party.party_id == MetalRequirementStaging.party_id)
+        .outerjoin(AppUser, AppUser.email == MetalRequirementStaging.operator_email)
         .where(
             MetalRequirementStaging.allocation_date == allocation_date,
             MetalRequirementStaging.status == SUBMITTED,
         )
         .group_by(
-            MetalRequirementStaging.operator_email, MetalRequirementStaging.party_id
+            MetalRequirementStaging.party_id,
+            Party.party_name,
+            MetalRequirementStaging.operator_email,
+            AppUser.display_name,
+            MetalRequirementStaging.submission_id,
         )
         .order_by(func.min(MetalRequirementStaging.submitted_at))
     )
-    return list(db.execute(_apply_scope(stmt, scope)).all())
+    return [
+        (row[0], row[1], row[2], row[3], row[4])
+        for row in db.execute(_apply_scope(stmt, scope)).all()
+    ]
 
 
 def insert_rows(db: Session, rows: list[MetalRequirementStaging]) -> int:

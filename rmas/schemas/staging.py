@@ -40,9 +40,20 @@ class SubmitRequirementResponse(BaseModel):
 
 
 class SubmissionSummaryRow(BaseModel):
-    operator_email: str
+    """One operator submission announced on the administrator's screen.
+
+    Both the name and the email are carried, as legacy does
+    (StagingService.gs:979-983): the name is what the admin reads, the email is
+    what identifies the account unambiguously.
+    """
+
     party_name: str
-    submitted_at: str
+    # Display name, falling back to the email when the account has none.
+    operator_name: str
+    operator_email: str
+    # Pre-formatted for display, matching the *_display convention elsewhere.
+    submitted_at_display: str
+    # Staging rows in this submission — a sector count, not a submission count.
     record_count: int
 
 

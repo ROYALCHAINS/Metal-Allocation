@@ -157,10 +157,68 @@ export function renderAllocationView(container, user) {
 
   const $ = (id) => container.querySelector(`#${id}`);
 
+  // Legacy's icon map, from Scripts.html's setBanner(). Without it a warning
+  // and an informational notice both render an "i".
+  const BANNER_ICONS = { error: '!', warn: '!', success: '✓', locked: '■', info: 'i' };
+
+  function bannerHtml(kind, innerHtml) {
+    return `<div class="banner banner--${kind}"><span class="banner__icon">${
+      BANNER_ICONS[kind] || 'i'
+    }</span><span>${innerHtml}</span></div>`;
+  }
+
+  /** One transient notice, replacing whatever was there. Save/submit/error use this. */
   function banner(kind, text) {
-    $('allocBanner').innerHTML = text
-      ? `<div class="banner banner--${kind}"><span class="banner__icon">i</span><span>${escapeHtml(text)}</span></div>`
-      : '';
+    $('allocBanner').innerHTML = text ? bannerHtml(kind, escapeHtml(text)) : '';
+  }
+
+  /**
+   * Several notices at once, stacked in order. A load can raise two at the same
+   * time — operator submissions were loaded AND the figures were carried from an
+   * older date — and they explain different columns, so neither should hide the
+   * other. Legacy showed only one because it had a single banner element.
+   */
+  function renderNotices(notices) {
+    $('allocBanner').innerHTML = notices
+      .map((notice) => bannerHtml(notice.kind, notice.html))
+      .join('');
+  }
+
+  /**
+   * The administrator's announcement that operator figures are on the screen.
+   * Null for operators (who submitted is the admin's business) and for a saved
+   * date, where staging is no longer a proposal — legacy suppresses it too.
+   */
+  function submissionNotice() {
+    if (!isAdmin || model.is_saved) return null;
+
+    const submissions = model.submissions || [];
+    if (!submissions.length) {
+      return {
+        kind: 'info',
+        html: escapeHtml(
+          `No operator submissions have been received for ${model.selected_date_display}.`
+        ),
+      };
+    }
+
+    // The count is submissions, NOT staged_value_count — that one counts fields
+    // overlaid, so a single submission across three sectors would read as three.
+    const lines = submissions
+      .map(
+        (s) =>
+          `<div class="submission-line" title="${escapeHtml(s.operator_email)}">${escapeHtml(s.party_name)} &mdash; ${escapeHtml(
+            s.operator_name
+          )} &mdash; ${escapeHtml(s.submitted_at_display)}</div>`
+      )
+      .join('');
+
+    return {
+      kind: 'info',
+      html:
+        `<strong>${submissions.length} operator submission(s) loaded into this date.` +
+        ` Adjust the figures, allocate, then save.</strong>${lines}`,
+    };
   }
 
   function renderRows() {
@@ -325,12 +383,18 @@ export function renderAllocationView(container, user) {
       $('dateStatusBox').textContent = model.is_saved
         ? 'Saved — this date is locked. Use a revision to change it.'
         : 'Editable — not yet saved.';
+      const notices = [];
+      const submissions = submissionNotice();
+      if (submissions) notices.push(submissions);
       if (model.used_fallback_source) {
-        banner(
-          'warn',
-          `Nothing was saved on the rule date (${model.rule_source_date_display}); figures were carried from ${model.previous_source_date_display}.`
-        );
+        notices.push({
+          kind: 'warn',
+          html: escapeHtml(
+            `Nothing was saved on the rule date (${model.rule_source_date_display}); figures were carried from ${model.previous_source_date_display}.`
+          ),
+        });
       }
+      renderNotices(notices);
       $('btnSave').disabled = !isAdmin || model.is_saved;
       $('btnSubmit').disabled = !model.can_submit;
       $('btnSubmit').textContent = model.already_submitted

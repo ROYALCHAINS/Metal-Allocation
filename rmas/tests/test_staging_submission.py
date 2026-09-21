@@ -12,6 +12,8 @@ reasonable implementation gets wrong:
     nothing today" is a statement, not an absence
 """
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -86,10 +88,15 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def _add_user(db, email, *, is_admin=False, party_name=None):
+# Distinguishes "caller said nothing" from an explicit display_name=None, which
+# is a real state: app_user.display_name is nullable.
+_UNSET = object()
+
+
+def _add_user(db, email, *, is_admin=False, party_name=None, display_name=_UNSET):
     user = AppUser(
         email=email,
-        display_name=email,
+        display_name=email if display_name is _UNSET else display_name,
         is_admin=is_admin,
         admin_denied=False,
         is_active=True,
@@ -378,3 +385,91 @@ def test_an_operator_does_not_see_another_party_submission(client, db_session) -
     assert model["staged_value_count"] == 0
     assert model["already_submitted"] is False
     assert model["can_submit"] is True
+
+
+# ------------------------------------------- announcing submissions to the admin
+
+TIMESTAMP_DISPLAY = re.compile(r"^\d{2}-[A-Z][a-z]{2}-\d{4} \d{2}:\d{2}:\d{2}$")
+
+
+def test_admin_sees_who_submitted_and_when(client, db_session) -> None:
+    """The admin must know the figures in front of them came from an operator."""
+    _add_user(
+        db_session, "op@royalchains.com", party_name="Royal Chain", display_name="Snehal"
+    )
+    _add_user(db_session, "admin@royalchains.com", is_admin=True)
+
+    _login(client, "op@royalchains.com")
+    _submit(client, db_session, "Royal Chain")
+
+    _login(client, "admin@royalchains.com")
+    model = client.get(f"/allocations/{DATE}").json()
+
+    assert len(model["submissions"]) == 1
+    entry = model["submissions"][0]
+    assert entry["party_name"] == "Royal Chain"
+    assert entry["operator_name"] == "Snehal"
+    assert entry["operator_email"] == "op@royalchains.com"
+    # The FORMAT, never the value — the column is written in UTC while the app
+    # timezone is Asia/Kolkata, and asserting a wall clock would pin that bug.
+    assert TIMESTAMP_DISPLAY.match(entry["submitted_at_display"])
+
+    # The two counts answer different questions and must never be confused: one
+    # submission here covers 2 allocation sectors + 1 flow sector.
+    assert model["staged_value_count"] == 3
+
+
+def test_operator_name_falls_back_to_the_email_when_unset(client, db_session) -> None:
+    """display_name is nullable, and a submission must never show up unnamed."""
+    _add_user(
+        db_session, "op@royalchains.com", party_name="Royal Chain", display_name=None
+    )
+    _add_user(db_session, "admin@royalchains.com", is_admin=True)
+
+    _login(client, "op@royalchains.com")
+    _submit(client, db_session, "Royal Chain")
+
+    _login(client, "admin@royalchains.com")
+    model = client.get(f"/allocations/{DATE}").json()
+    assert model["submissions"][0]["operator_name"] == "op@royalchains.com"
+
+
+def test_two_parties_produce_two_submission_lines(client, db_session) -> None:
+    _add_user(db_session, "rc@royalchains.com", party_name="Royal Chain")
+    _add_user(db_session, "aj@royalchains.com", party_name="Aalishaan")
+    _add_user(db_session, "admin@royalchains.com", is_admin=True)
+
+    _login(client, "rc@royalchains.com")
+    _submit(client, db_session, "Royal Chain")
+    _login(client, "aj@royalchains.com")
+    _submit(client, db_session, "Aalishaan", request_id="REQ-2")
+
+    _login(client, "admin@royalchains.com")
+    model = client.get(f"/allocations/{DATE}").json()
+
+    # A set, not a list: datetime('now') has one-second granularity, so two
+    # submissions in the same second have no guaranteed order between them.
+    assert {s["party_name"] for s in model["submissions"]} == {"Royal Chain", "Aalishaan"}
+
+
+def test_an_operator_never_receives_the_submissions_list(client, db_session) -> None:
+    """Admin-only is the server's rule, not the browser's.
+
+    The summary is already scope-filtered, so this operator could only ever have
+    seen their OWN row — but they are given nothing at all.
+    """
+    _add_user(db_session, "op@royalchains.com", party_name="Royal Chain")
+    _login(client, "op@royalchains.com")
+    _submit(client, db_session, "Royal Chain")
+
+    model = client.get(f"/allocations/{DATE}").json()
+    assert model["already_submitted"] is True, "their own submission did register"
+    assert model["submissions"] == []
+
+
+def test_a_date_with_no_submissions_returns_an_empty_list(client, db_session) -> None:
+    _add_user(db_session, "admin@royalchains.com", is_admin=True)
+    _login(client, "admin@royalchains.com")
+
+    model = client.get(f"/allocations/{DATE}").json()
+    assert model["submissions"] == []

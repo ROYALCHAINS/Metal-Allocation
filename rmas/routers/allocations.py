@@ -28,6 +28,8 @@ from schemas.allocation import (
     SaveAllocationResponse,
     TotalsResponse,
 )
+from schemas.staging import SubmissionSummaryRow
+from services.audit_report_service import format_audit_timestamp
 from services.scope_service import is_administrator
 from services.staging_service import apply_staging_to_model
 from services.allocation_service import (
@@ -155,6 +157,26 @@ def get_allocation_for_date(
     response.can_submit = (
         not is_administrator(user) and not model.is_saved and not state.already_submitted
     )
+
+    # Who submitted is the administrator's business alone. The summary is
+    # already scope-filtered, so an operator could only ever see their own row —
+    # but the gate is the server's to hold, not the browser's (rule 8), so an
+    # operator receives nothing at all.
+    #
+    # format_audit_timestamp() rather than a second formatter: the value comes
+    # from the same SQLite datetime('now') the audit log uses, and reusing it
+    # keeps one convention — including its documented UTC/Asia-Kolkata caveat.
+    if is_administrator(user):
+        response.submissions = [
+            SubmissionSummaryRow(
+                party_name=s.party_name,
+                operator_name=s.operator_name,
+                operator_email=s.operator_email,
+                submitted_at_display=format_audit_timestamp(s.submitted_at),
+                record_count=s.record_count,
+            )
+            for s in state.submissions
+        ]
     return response
 
 

@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RMAS Port Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+/* ------------------------------------------------------------------
+   Palette, typefaces and figure conventions are taken from the system
+   being reported on: frontend/src/styles/tokens.css - navy + gold,
+   Inter for text, JetBrains Mono for every figure.
+   ------------------------------------------------------------------ */
+:root{
+  --ground:#f4f7fb;
+  --surface:#ffffff;
+  --surface-2:#f8fafc;
+  --ink:#0f172a;
+  --ink-2:#334155;
+  --muted:#64748b;
+  --faint:#94a3b8;
+  --line:#e2e8f0;
+  --line-soft:#eef2f7;
+  --accent:#a87f30;
+  --accent-bright:#c89d47;
+  --accent-wash:#fdf6e7;
+  --ok:#047857;
+  --ok-wash:#ecfdf5;
+  --part:#b45309;
+  --part-wash:#fffbeb;
+  --idle:#64748b;
+  --idle-wash:#f1f5f9;
+  --open:#be123c;
+  --open-wash:#fff1f2;
+  --shadow:0 1px 2px rgba(15,23,42,.06);
+  --shadow-lift:0 6px 20px rgba(11,22,35,.09);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0b1623;
+    --surface:#101e30;
+    --surface-2:#16283d;
+    --ink:#e9eff7;
+    --ink-2:#cbd5e1;
+    --muted:#94a3b8;
+    --faint:#64748b;
+    --line:#1e3857;
+    --line-soft:#16283d;
+    --accent:#dcb15b;
+    --accent-bright:#edd085;
+    --accent-wash:#2a2110;
+    --ok:#34d399;
+    --ok-wash:#0a2f26;
+    --part:#fcd34d;
+    --part-wash:#332608;
+    --idle:#94a3b8;
+    --idle-wash:#16283d;
+    --open:#fca5a5;
+    --open-wash:#391520;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+    --shadow-lift:0 6px 22px rgba(0,0,0,.45);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0b1623;
+  --surface:#101e30;
+  --surface-2:#16283d;
+  --ink:#e9eff7;
+  --ink-2:#cbd5e1;
+  --muted:#94a3b8;
+  --faint:#64748b;
+  --line:#1e3857;
+  --line-soft:#16283d;
+  --accent:#dcb15b;
+  --accent-bright:#edd085;
+  --accent-wash:#2a2110;
+  --ok:#34d399;
+  --ok-wash:#0a2f26;
+  --part:#fcd34d;
+  --part-wash:#332608;
+  --idle:#94a3b8;
+  --idle-wash:#16283d;
+  --open:#fca5a5;
+  --open-wash:#391520;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+  --shadow-lift:0 6px 22px rgba(0,0,0,.45);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:15px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{
+  max-width:1080px;
+  margin:0 auto;
+  padding-inline:20px;
+  padding-block:0 72px;
+}
+.num{font-family:'JetBrains Mono',ui-monospace,'SFMono-Regular',monospace;font-variant-numeric:tabular-nums}
+
+/* ---------- masthead ---------- */
+.mast{
+  border-bottom:1px solid var(--line);
+  padding-block:46px 30px;
+  display:grid;
+  gap:18px;
+}
+.eyebrow{
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--accent);
+  font-weight:600;
+}
+h1{
+  font-size:clamp(30px,5.2vw,46px);
+  line-height:1.08;
+  letter-spacing:-.022em;
+  font-weight:800;
+  margin:0;
+  text-wrap:balance;
+}
+.standfirst{
+  margin:0;
+  max-width:62ch;
+  color:var(--ink-2);
+  font-size:17px;
+}
+.mast__meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 22px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;
+  color:var(--muted);
+  letter-spacing:.03em;
+}
+.mast__meta b{color:var(--ink-2);font-weight:600}
+
+/* ---------- headline tiles ---------- */
+.tiles{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:1px;
+  background:var(--line);
+  border:1px solid var(--line);
+  margin-block:34px;
+  box-shadow:var(--shadow-lift);
+}
+.tile{background:var(--surface);padding:18px 18px 16px;display:grid;gap:3px;align-content:start}
+.tile__v{font-family:'JetBrains Mono',monospace;font-size:27px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.tile__l{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.tile__n{font-size:12px;color:var(--faint);line-height:1.45}
+.tile--gold .tile__v{color:var(--accent)}
+.tile--idle .tile__v{color:var(--idle)}
+
+/* ---------- sections ---------- */
+section{padding-block:40px 6px;border-top:1px solid var(--line-soft)}
+section:first-of-type{border-top:0}
+h2{
+  font-size:13px;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  color:var(--muted);
+  font-weight:700;
+  margin:0 0 6px;
+}
+.sec-lead{
+  margin:0 0 24px;
+  font-size:22px;
+  font-weight:700;
+  letter-spacing:-.015em;
+  max-width:36ch;
+  text-wrap:balance;
+}
+p{max-width:68ch}
+.prose{color:var(--ink-2)}
+
+/* ---------- domain explainer ---------- */
+.explain{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:26px 38px}
+.explain h3{font-size:15px;margin:0 0 6px;font-weight:700}
+.explain p{margin:0;font-size:14.5px;color:var(--ink-2)}
+.formula{
+  margin:26px 0 0;
+  padding:16px 18px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-left:3px solid var(--accent-bright);
+  font-family:'JetBrains Mono',monospace;
+  font-size:13.5px;
+  overflow-x:auto;
+  white-space:nowrap;
+  color:var(--ink);
+}
+.formula span{color:var(--muted)}
+
+/* ---------- layer ledger ---------- */
+.ledger{border-top:1px solid var(--line);margin-top:4px}
+.lrow{
+  display:grid;
+  grid-template-columns:minmax(150px,1.5fr) minmax(120px,1fr) 88px;
+  gap:8px 20px;
+  align-items:center;
+  padding:13px 0;
+  border-bottom:1px solid var(--line-soft);
+}
+.lrow__name{font-weight:600;font-size:14.5px}
+.lrow__name small{display:block;font-weight:400;color:var(--muted);font-size:12.5px;font-family:'JetBrains Mono',monospace}
+.meter{height:6px;background:var(--idle-wash);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent-bright)}
+.meter i.full{background:var(--ok)}
+.lrow__c{text-align:right;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink-2)}
+
+/* ---------- feature rows ---------- */
+.feat{border-top:1px solid var(--line)}
+.f{
+  display:grid;
+  grid-template-columns:96px 1fr;
+  gap:6px 18px;
+  padding:16px 0 16px 14px;
+  border-bottom:1px solid var(--line-soft);
+  border-left:3px solid var(--idle);
+  background:linear-gradient(90deg,var(--idle-wash),transparent 42%);
+}
+.f--ok{border-left-color:var(--ok);background:linear-gradient(90deg,var(--ok-wash),transparent 42%)}
+.f--part{border-left-color:var(--part);background:linear-gradient(90deg,var(--part-wash),transparent 42%)}
+.f--no{border-left-color:var(--idle)}
+.f__s{
+  font-family:'JetBrains Mono',monospace;
+  font-size:10.5px;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+  font-weight:700;
+  padding-top:3px;
+}
+.f--ok .f__s{color:var(--ok)}
+.f--part .f__s{color:var(--part)}
+.f--no .f__s{color:var(--idle)}
+.f__b h3{margin:0 0 4px;font-size:15.5px;font-weight:700;letter-spacing:-.01em}
+.f__b p{margin:0;font-size:14px;color:var(--ink-2);max-width:74ch}
+.f__b p + p{margin-top:5px}
+.paths{
+  margin:8px 0 0;
+  display:flex;
+  flex-wrap:wrap;
+  gap:5px;
+}
+.paths code{
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;
+  background:var(--surface-2);
+  border:1px solid var(--line);
+  padding:2px 6px;
+  color:var(--muted);
+}
+.note{
+  margin-top:8px;
+  font-size:13.5px;
+  color:var(--part);
+  font-weight:500;
+}
+.f--no .note{color:var(--muted)}
+.f__b code{font-family:'JetBrains Mono',monospace;font-size:12.5px}
+
+/* ---------- registers ---------- */
+.tablewrap{overflow-x:auto}
+.reg{width:100%;border-collapse:collapse;margin-top:4px;min-width:520px}
+.reg caption{
+  text-align:left;
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+  color:var(--muted);
+  font-weight:600;
+  padding:14px 0 8px;
+}
+.reg th{
+  text-align:left;
+  font-size:10.5px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--faint);
+  font-weight:700;
+  border-bottom:1px solid var(--line);
+  padding:0 14px 7px 0;
+}
+.reg th:last-child,.reg td:last-child{padding-right:0}
+.reg td{
+  border-bottom:1px solid var(--line-soft);
+  padding:12px 14px 12px 0;
+  font-size:14px;
+  color:var(--ink-2);
+  vertical-align:top;
+}
+.reg td:first-child{color:var(--ink);font-weight:600;width:24%}
+.reg td:last-child{width:96px}
+.reg code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--muted)}
+.tag{
+  display:inline-block;
+  font-family:'JetBrains Mono',monospace;
+  font-size:10px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  font-weight:700;
+  padding:2px 7px;
+  white-space:nowrap;
+}
+.tag--block{background:var(--open-wash);color:var(--open)}
+.tag--soon{background:var(--part-wash);color:var(--part)}
+.tag--later{background:var(--idle-wash);color:var(--idle)}
+.tag--design{background:var(--accent-wash);color:var(--accent)}
+
+/* ---------- callout ---------- */
+.callout{
+  margin-top:28px;
+  padding:18px 20px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-top:3px solid var(--open);
+  box-shadow:var(--shadow);
+}
+.callout h3{margin:0 0 6px;font-size:15px;font-weight:700}
+.callout p{margin:0;font-size:14px;color:var(--ink-2)}
+
+/* ---------- footer ---------- */
+footer{
+  margin-top:52px;
+  border-top:1px solid var(--line);
+  padding-top:22px;
+  font-size:13.5px;
+  color:var(--muted);
+}
+footer p{max-width:74ch;margin:0}
+footer p + p{margin-top:10px}
+footer code{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink-2)}
+footer strong{color:var(--ink-2)}
+
+@media (max-width:560px){
+  .lrow{grid-template-columns:1fr 70px;grid-template-areas:"n c" "m m"}
+  .lrow__name{grid-area:n}
+  .lrow__c{grid-area:c}
+  .meter{grid-area:m}
+  .f{grid-template-columns:1fr;gap:4px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">Royal Chains &middot; Build Review</div>
+  <h1>RMAS Port Ledger</h1>
+  <p class="standfirst">Where the Apps&nbsp;Script &rarr; Python/JavaScript port of the Royal Metal Allocation System actually stands: what is finished, what is half-finished, what has not been started, and which decisions are still open.</p>
+  <div class="mast__meta">
+    <span>Reviewed <b>2026-09-21</b></span>
+    <span>Branch <b>main</b> @ <b>6968194</b></span>
+    <span>Legacy reference build <b>5H</b></span>
+    <span>Working tree <b>clean</b></span>
+  </div>
+</header>
+
+<div class="tiles">
+  <div class="tile tile--gold">
+    <div class="tile__v num">16</div>
+    <div class="tile__l">Endpoints live</div>
+    <div class="tile__n">Across six routers, plus /health</div>
+  </div>
+  <div class="tile">
+    <div class="tile__v num">6&nbsp;/&nbsp;6</div>
+    <div class="tile__l">Screens built</div>
+    <div class="tile__n">Login and all five nav views render</div>
+  </div>
+  <div class="tile">
+    <div class="tile__v num">241</div>
+    <div class="tile__l">Tests passing</div>
+    <div class="tile__n">18 files, zero failures, 38s</div>
+  </div>
+  <div class="tile">
+    <div class="tile__v num">12</div>
+    <div class="tile__l">Tables + 3 views</div>
+    <div class="tile__n">Alembic 0001&ndash;0004, all applied</div>
+  </div>
+  <div class="tile tile--idle">
+    <div class="tile__v num">1</div>
+    <div class="tile__l">Write path missing</div>
+    <div class="tile__n">Admin revision is not built</div>
+  </div>
+  <div class="tile tile--idle">
+    <div class="tile__v num">0&nbsp;/&nbsp;19</div>
+    <div class="tile__l">Legacy files retired</div>
+    <div class="tile__n">All still in coexistence</div>
+  </div>
+</div>
+
+<section>
+  <h2>1 &middot; What this system is</h2>
+  <p class="sec-lead">A daily ledger for physical gold moving through a manufacturing floor.</p>
+  <div class="explain">
+    <div>
+      <h3>The question it answers</h3>
+      <p>Once per working day: given the metal <em>acquired</em> from each supplying party and the metal <em>required</em> by each manufacturing sector, how much is <em>alloted</em> to each sector, and what carries forward to tomorrow?</p>
+    </div>
+    <div>
+      <h3>Demand may exceed supply</h3>
+      <p>That is not an error. The shortfall becomes the balance and rolls into the next day's opening requirement. A closing balance of zero is equally valid.</p>
+    </div>
+    <div>
+      <h3>Two-stage day</h3>
+      <p>Operators submit requirement and acquisition figures into a staging table. An administrator reviews them, sets the allotment and commits &mdash; and only that commit writes the masters and computes a balance.</p>
+    </div>
+    <div>
+      <h3>Everything is audited</h3>
+      <p>Each commit records both the previous and the updated state, the actor, the reason and the request id. The log is append-only, and failed attempts are written to it too.</p>
+    </div>
+  </div>
+  <div class="formula">balance <span>=</span> previous_requirement <span>+</span> today_required <span>&minus;</span> alloted<span>&nbsp;&nbsp;&nbsp;&nbsp;// kg to exactly 3 decimals, stored as integer grams</span></div>
+  <p class="prose" style="margin-top:18px">Two conventions carried over from the legacy system are worth knowing before reading any of this code. Weights never touch a <code class="num">float</code> &mdash; they are integer grams in the database and <code class="num">Decimal</code> in Python, because three decimals of a kilogram is exactly one gram. And the field is spelled <strong class="num">alloted</strong>, with one <span class="num">l</span>, so that comparisons against historical data still line up.</p>
+</section>
+
+<section>
+  <h2>2 &middot; What exists on disk</h2>
+  <p class="sec-lead">The layering held. No router imports a model; no service opens a session.</p>
+  <div class="ledger">
+    <div class="lrow">
+      <div class="lrow__name">Routers <small>rmas/routers/</small></div>
+      <div class="meter"><i class="full" style="width:100%"></i></div>
+      <div class="lrow__c">7 files</div>
+    </div>
+    <div class="lrow">
+      <div class="lrow__name">Services <small>rmas/services/</small></div>
+      <div class="meter"><i class="full" style="width:100%"></i></div>
+      <div class="lrow__c">11 files</div>
+    </div>
+    <div class="lrow">
+      <div class="lrow__name">Repository <small>rmas/repository/</small></div>
+      <div class="meter"><i class="full" style="width:100%"></i></div>
+      <div class="lrow__c">8 files</div>
+    </div>
+    <div class="lrow">
+      <div class="lrow__name">Models and schemas <small>rmas/models/, rmas/schemas/</small></div>
+      <div class="meter"><i class="full" style="width:100%"></i></div>
+      <div class="lrow__c">15 files</div>
+    </div>
+    <div class="lrow">
+      <div class="lrow__name">Frontend <small>frontend/src/</small></div>
+      <div class="meter"><i class="full" style="width:100%"></i></div>
+      <div class="lrow__c">18 modules</div>
+    </div>
+    <div class="lrow">
+      <div class="lrow__name">Tests <small>rmas/tests/</small></div>
+      <div class="meter"><i style="width:78%"></i></div>
+      <div class="lrow__c">18 files</div>
+    </div>
+    <div class="lrow">
+      <div class="lrow__name">Legacy source retired <small>legacy files/</small></div>
+      <div class="meter"><i style="width:2%"></i></div>
+      <div class="lrow__c">0 of 19</div>
+    </div>
+  </div>
+  <p class="prose" style="margin-top:18px">Roughly <span class="num">6,960</span> lines of application Python, <span class="num">2,880</span> of tests and <span class="num">4,500</span> of frontend JavaScript and CSS. The database holds real reference data &mdash; 21 allocation sectors, 8 flow parties, 9 parties &mdash; plus one committed allocation date, 11 staged rows and 37 audit entries left behind by live exercise of the save and submit paths.</p>
+</section>
+
+<section>
+  <h2>3 &middot; Feature ledger</h2>
+  <p class="sec-lead">Thirteen areas shipped, four partial, five not started, three dropped on purpose.</p>
+  <div class="feat">
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Authentication &mdash; username and password</h3>
+        <p>Closed roster, no signup page. Login, logout and session identity work; passwords are bcrypt-hashed and verified in constant time. Accounts are provisioned out of band by an administrator, mirroring how the legacy system was configured by hand.</p>
+        <div class="paths"><code>routers/auth.py</code><code>services/password_service.py</code><code>create_user.py</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Scope and authorisation</h3>
+        <p>Role and party scope are resolved server-side from the session on every request; a client-supplied party or sector filter is intersected with that scope rather than trusted. A deny entry overrides an admin grant. Operators see only their own party's rows on every screen.</p>
+        <div class="paths"><code>services/scope_service.py</code><code>routers/deps.py</code><code>test_scope_service.py</code><code>test_sector_scoping.py</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Weight precision, end to end</h3>
+        <p>One module owns every kilogram-to-gram conversion and refuses a float argument outright rather than converting it silently. Rounding is half-up at the third decimal; comparisons use the legacy epsilon instead of equality. Proven by exact round-trip and accumulation-without-drift tests.</p>
+        <div class="paths"><code>services/weight_service.py</code><code>lib/format.js</code><code>test_weight_service.py</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Working-week date rules</h3>
+        <p>Monday looks back to Saturday, every other day looks back one day &mdash; the six-day week, not a simplification to "yesterday". When nothing was saved on the rule date, the carry-forward falls back to the most recent saved date, so a skipped day never silently resets a balance to zero.</p>
+        <div class="paths"><code>services/date_service.py</code><code>test_date_service.py</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Schema, migrations and reference data</h3>
+        <p>Twelve tables and three presentation-only kilogram views, built from the supplied schema across four Alembic revisions. Five departures from that file are documented in the relevant model's docstring rather than applied silently: a password column, a widened audit action list, a nullable audit date, a corrected staging status vocabulary, and priority stored as text because users see the label unchanged.</p>
+        <div class="paths"><code>migrations/versions/0001&ndash;0004</code><code>seed_reference_data.py</code><code>models/</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Daily Allocation &mdash; read path</h3>
+        <p>Builds the day's model from live sector definitions: previous requirement carried forward, staged operator values merged in, six KPI totals, and the date's saved or unsaved status. One role-conditional view rather than two, matching the legacy screen.</p>
+        <div class="paths"><code>GET /allocations/{date}</code><code>services/allocation_service.py</code><code>views/allocation.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Daily Allocation &mdash; save path</h3>
+        <p>Admin-only commit. Rows are rebuilt from the database and indexed by sector, so row order cannot corrupt a save and party, purity and priority never come from the client. Writes are serialised per date, guarded by a 900-second request-id window, and both ledgers plus the audit entry commit together; staged rows are then marked consumed.</p>
+        <div class="paths"><code>POST /allocations/{date}</code><code>repository/idempotency_repo.py</code><code>test_allocation_save.py</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Operator requirement submission</h3>
+        <p>An operator submits required and acquired figures for their own parties into staging, once per date &mdash; a correction has to go through the administrator. Scope comes from the session; the payload carries weights keyed by sector id and nothing else. Submissions, blocked resubmissions and failures all land in the audit log.</p>
+        <div class="paths"><code>POST /staging/{date}</code><code>services/staging_service.py</code><code>test_staging_submission.py</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Allocation History</h3>
+        <p>Date range, sector and balance-status filters, server-side paging with a working pager, a summary strip and per-row pending or cleared pills. A reversed date range is swapped rather than rejected, and an out-of-range limit falls back to the page size &mdash; invalid input is corrected, not refused.</p>
+        <div class="paths"><code>GET /reports/allocation-history</code><code>views/allocationHistory.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Metal Flow History</h3>
+        <p>Deliberately chart-only &mdash; no data table and no pager, per its page spec. Keyed by party rather than by order type: the eight rows are the parties metal arrives for, each mapping to itself.</p>
+        <div class="paths"><code>GET /reports/flow-history</code><code>GET /reports/flow-analysis</code><code>views/flowHistory.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Analysis Dashboard</h3>
+        <p>The only page that joins both ledgers. Six KPI cards, by-date, by-sector and by-priority series, top pending sectors, the cycle-over-cycle acquired delta and the flow heatmap. Charts use the hand-written SVG engine ported alongside its stylesheet, not a charting library.</p>
+        <div class="paths"><code>GET /reports/dashboard</code><code>components/charts.js</code><code>views/analysis.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>Audit Log</h3>
+        <p>Admin-gated list with action, status, user and date filters, a KPI strip, and a detail modal showing the before-and-after diff for both ledgers. Append-only is enforced, not merely intended, and an entry recorded before its date could be resolved is never filtered out by the date window.</p>
+        <div class="paths"><code>GET /audit</code><code>GET /audit/entry/{id}</code><code>test_audit_append_only.py</code><code>views/audit.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--ok">
+      <div class="f__s">Shipped</div>
+      <div class="f__b">
+        <h3>App shell and visual contract</h3>
+        <p>Header, nav tabs with live record-count pills, and the three legacy stylesheets ported in their load-bearing order. All weight formatting goes through one helper that works in integer grams, so no view can reintroduce float drift through a stray toFixed call.</p>
+        <div class="paths"><code>styles/tokens.css</code><code>styles/reports.css</code><code>styles/audit.css</code><code>components/nav.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--part">
+      <div class="f__s">Partial</div>
+      <div class="f__b">
+        <h3>Report filters</h3>
+        <p>The endpoints already accept <code>party_id</code>, <code>sector_id</code>, <code>limit</code> and <code>offset</code>. The filter card exposes only date range, quick ranges, sector and balance status.</p>
+        <p class="note">Missing in the UI: filtering by party and by priority. The server work is done; this is a control-bar change.</p>
+        <div class="paths"><code>components/filterBar.js</code></div>
+      </div>
+    </div>
+
+    <div class="f f--part">
+      <div class="f__s">Partial</div>
+      <div class="f__b">
+        <h3>Operator submissions on the admin screen</h3>
+        <p>Staged values are merged into the admin's model correctly, and the payload already carries the submission count and the per-operator record of who submitted and when.</p>
+        <p class="note">Neither is rendered. Legacy shows a banner reading "N operator submission(s) loaded into this date"; nothing surfaces it yet, so the administrator commits figures without being told they came from operators.</p>
+        <div class="paths"><code>services/staging_service.py &rarr; submission_summary()</code></div>
+      </div>
+    </div>
+
+    <div class="f f--part">
+      <div class="f__s">Partial</div>
+      <div class="f__b">
+        <h3>Truncation notices</h3>
+        <p>The audit page computes its truncation flag honestly against the row cap. Both history pages hard-code it to false, following legacy, so the notice that is already wired into the markup can never fire.</p>
+        <p class="note">The page spec says to raise the history pages to the audit page's behaviour rather than flatten the audit page down to theirs. Not yet done.</p>
+      </div>
+    </div>
+
+    <div class="f f--part">
+      <div class="f__s">Partial</div>
+      <div class="f__b">
+        <h3>HTTP-level test coverage</h3>
+        <p>Health, auth, sectors, all three audit endpoints, staging submission and the allocation read path are exercised through the real HTTP stack. Dashboard rules are covered at service level only.</p>
+        <p class="note">No HTTP test for <code>POST /allocations/{date}</code> or for any of the five report endpoints &mdash; the exact gap that previously hid an attribute error on the dashboard route.</p>
+      </div>
+    </div>
+
+    <div class="f f--no">
+      <div class="f__s">Not built</div>
+      <div class="f__b">
+        <h3>Administrator revision of a saved date</h3>
+        <p>The single largest hole, and the only missing write path. A saved date is immutable with no supported way to correct it: there is no service function, no endpoint and no UI. The groundwork is in place &mdash; the <code>REVISE</code> and <code>FAILED_REVISION</code> action types exist in the schema, and the reason check (minimum ten characters) and revision numbering are ported and currently unused.</p>
+        <p class="note">Until this ships, a mistyped allotment can only be corrected in the database by hand, outside the audit trail the system exists to keep.</p>
+        <div class="paths"><code>legacy: Code.gs &rarr; reviseDailyAllocation()</code></div>
+      </div>
+    </div>
+
+    <div class="f f--no">
+      <div class="f__s">Not built</div>
+      <div class="f__b">
+        <h3>CSV export</h3>
+        <p>Legacy offers a download from both history pages, plus a copy-and-paste modal for when the browser blocks it. Nothing in the frontend references CSV or export.</p>
+        <div class="paths"><code>legacy: Reports.html &rarr; exportAllocationHistory(), exportFlowHistory(), offerCsv()</code></div>
+      </div>
+    </div>
+
+    <div class="f f--no">
+      <div class="f__s">Not built</div>
+      <div class="f__b">
+        <h3>Toast notifications</h3>
+        <p>Legacy confirms every save, submission, export and warning through a toast. The port has no equivalent; feedback is inline only.</p>
+        <div class="paths"><code>legacy: Reports.html, Scripts.html &rarr; toast()</code></div>
+      </div>
+    </div>
+
+    <div class="f f--no">
+      <div class="f__s">Not built</div>
+      <div class="f__b">
+        <h3>Three legacy read endpoints</h3>
+        <p><code>getOperatorRequirementForDate</code>, <code>getCurrentUserScope</code> and <code>getStagedRequirementsForDate</code>. None had a client caller in legacy, so none was ported &mdash; but the first is the operator's own "what did I submit for this date" view, which the port currently has no way to show.</p>
+        <div class="paths"><code>legacy: StagingService.gs</code></div>
+      </div>
+    </div>
+
+    <div class="f f--no">
+      <div class="f__s">Not built</div>
+      <div class="f__b">
+        <h3>Revision summary and access diagnostics</h3>
+        <p><code>getDateRevisionSummary()</code> could back a "this date has been revised N times" badge on the Daily Allocation screen; <code>diagnoseAdminAccess()</code> is a support tool. Neither has a caller today, and both depend on the revision path existing first.</p>
+        <div class="paths"><code>legacy: AuditReportService.gs</code></div>
+      </div>
+    </div>
+
+    <div class="f f--no">
+      <div class="f__s">By design</div>
+      <div class="f__b">
+        <h3>Deliberately not ported</h3>
+        <p>Header-label column detection, which existed only because spreadsheet column order drifted and an explicit SQL schema removes the problem. The sheet-layout inspectors, which have no meaning against a database. And the version check, whose duplicate build tag made it weaker than it looked.</p>
+        <div class="paths"><code>legacy: SchemaService.gs</code><code>DiagnosticsService.gs</code><code>VersionCheck.gs</code></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2>4 &middot; What to build next</h2>
+  <p class="sec-lead">Ordered by whether a user is currently stuck.</p>
+  <div class="tablewrap">
+  <table class="reg">
+    <caption>Gap register</caption>
+    <thead>
+      <tr><th scope="col">Work</th><th scope="col">Why it matters</th><th scope="col">Priority</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Revision path</td>
+        <td>There is no supported way to correct a committed date. Everything else on this list is an improvement; this one is a missing capability. Needs the endpoint, before-and-after snapshots, revision numbering and the mandatory reason.</td>
+        <td><span class="tag tag--block">Blocking</span></td>
+      </tr>
+      <tr>
+        <td>Operator submission banner</td>
+        <td>An administrator commits figures without being told they came from operators. The data is already in the payload, so this is rendering rather than plumbing.</td>
+        <td><span class="tag tag--soon">Next</span></td>
+      </tr>
+      <tr>
+        <td>Operator's own submission view</td>
+        <td>After submitting, an operator has no screen showing what they sent. <code>getOperatorRequirementForDate</code> is the legacy answer.</td>
+        <td><span class="tag tag--soon">Next</span></td>
+      </tr>
+      <tr>
+        <td>HTTP tests for save and reports</td>
+        <td>Six endpoints have no test through the real stack, including the one that writes both ledgers.</td>
+        <td><span class="tag tag--soon">Next</span></td>
+      </tr>
+      <tr>
+        <td>See it in a browser</td>
+        <td>Every page so far has been verified server-side only, through tests and direct queries. No screen has been rendered and looked at, so visual fidelity against the legacy design is untested.</td>
+        <td><span class="tag tag--soon">Next</span></td>
+      </tr>
+      <tr>
+        <td>Party and priority filters</td>
+        <td>Server-side support already exists; only the filter card needs the two controls.</td>
+        <td><span class="tag tag--later">Later</span></td>
+      </tr>
+      <tr>
+        <td>CSV export and toasts</td>
+        <td>Both are legacy features users will notice missing, and neither blocks a workflow.</td>
+        <td><span class="tag tag--later">Later</span></td>
+      </tr>
+      <tr>
+        <td>Retire verified legacy files</td>
+        <td>Nineteen source files are still in coexistence. Several now have verified ports and could move to retirement, one file at a time as each is confirmed.</td>
+        <td><span class="tag tag--later">Later</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>5 &middot; Decisions still open</h2>
+  <p class="sec-lead">Carried forward as questions, never resolved silently.</p>
+  <div class="tablewrap">
+  <table class="reg">
+    <caption>Open question register</caption>
+    <thead>
+      <tr><th scope="col">Question</th><th scope="col">State</th><th scope="col">Kind</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Allocation rule toggles</td>
+        <td>The code disables <code>REQUIRE_FULL_ALLOCATION</code> and <code>REQUIRE_POSITIVE_ALLOTED</code>; an earlier "final business decisions" document says to enforce them. The conflict has never been settled, and the port follows the code.</td>
+        <td><span class="tag tag--design">Business</span></td>
+      </tr>
+      <tr>
+        <td>Duplicate request id</td>
+        <td>A repeated id currently errors, matching legacy. The stated rule, and the response column in the supplied schema, both describe replaying the original result instead.</td>
+        <td><span class="tag tag--design">Behaviour</span></td>
+      </tr>
+      <tr>
+        <td>Audit timestamps</td>
+        <td>Written as UTC by the database default while the application timezone is Asia/Kolkata, so every displayed time runs five and a half hours behind. Fixing it means changing how the column is written, not how it is displayed.</td>
+        <td><span class="tag tag--block">Defect</span></td>
+      </tr>
+      <tr>
+        <td>Two fulfilment rates</td>
+        <td>Allocation History divides allotment by previous plus today's requirement; the dashboard divides by today's requirement alone. Each matches its own screen spec, so the disagreement is deliberate &mdash; but worth confirming it is intended.</td>
+        <td><span class="tag tag--design">Behaviour</span></td>
+      </tr>
+      <tr>
+        <td>Closing Balance Trend label</td>
+        <td>Legacy calls the chart a cumulative physical vault stock position while plotting summed outstanding balance, which is neither. The data is plotted unchanged and the subtitle now says what it actually is; the intended metric is still undecided.</td>
+        <td><span class="tag tag--design">Business</span></td>
+      </tr>
+      <tr>
+        <td>Six parties own nothing</td>
+        <td>Aqua, ARK, IHG, Titan, Malabar and Aditya Birla are real parties that no sector belongs to. An operator scoped to one would see an empty screen on every page &mdash; a data state rather than a bug, but one the UI does not explain.</td>
+        <td><span class="tag tag--design">Data</span></td>
+      </tr>
+      <tr>
+        <td>Revision idempotency</td>
+        <td>Legacy's revise path has no request-id guard, unlike save and submit. Whether the port should add one is unanswered, and becomes live the moment the revision path is built.</td>
+        <td><span class="tag tag--soon">Behaviour</span></td>
+      </tr>
+      <tr>
+        <td>Operator carry-forward</td>
+        <td>The admin screen falls back to the latest saved date when the rule date is empty; legacy's operator screen checks only the exact rule date. Replicate the asymmetry or unify the two &mdash; still undecided.</td>
+        <td><span class="tag tag--soon">Behaviour</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout">
+    <h3>The one to settle first</h3>
+    <p>The rule-toggle conflict is the only open item that could invalidate data already committed, rather than merely change a screen. If full allocation and positive allotment were always meant to be enforced, every date saved under the permissive rules would need reviewing &mdash; and that review needs the revision path, which does not exist yet. The two questions are really one question.</p>
+  </div>
+</section>
+
+<footer>
+  <p><strong>How this was verified.</strong> Source read directly from the working tree at commit <code>6968194</code>; the endpoint list taken from the route decorators; row counts queried from <code>rmas/rmas.db</code>; the test figure from a full pytest run on 2026-09-21 &mdash; <code>241 passed</code> in 38.24s. Feature status was cross-checked against the twenty-one session logs under <code>sessions/</code> and against the legacy source in <code>legacy files/</code>, which remains authoritative wherever it disagrees with documentation.</p>
+  <p><strong>What was not verified.</strong> No page has been rendered in a browser. Everything in section 3 is confirmed at the source, API and database level only.</p>
+</footer>
+
+</div>
+</body>
+</html>

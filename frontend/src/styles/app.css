@@ -138,3 +138,11 @@
    leaves a "hidden" button visible — the Daily Allocation screen shows Save to
    administrators and Submit to operators using exactly that attribute. */
 [hidden] { display: none !important; }
+
+/* The per-submission "party — operator — time" lines under the Daily
+   Allocation banner headline. Legacy listed these in a modal (Scripts.html's
+   announceSubmissions), so there is no legacy class to reuse; the banner
+   itself is unchanged. The lines are flush-left against the headline rather
+   than indented, so the parties read as a column. */
+.submission-line { margin-top: 4px; }
+.submission-line:first-of-type { margin-top: 8px; }

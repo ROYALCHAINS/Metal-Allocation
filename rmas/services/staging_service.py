@@ -66,12 +66,27 @@ class StagedRow:
 
 
 @dataclass
+class SubmissionSummary:
+    """One operator submission loaded into a date, for the admin's screen.
+
+    submitted_at is the raw stored value; it is formatted at the HTTP boundary,
+    not here, so the service stays free of presentation concerns.
+    """
+
+    party_name: str
+    operator_name: str
+    operator_email: str
+    submitted_at: str
+    record_count: int
+
+
+@dataclass
 class SubmissionState:
     """What the Daily Allocation screen needs to decide what is editable."""
 
     already_submitted: bool = False
     staged_value_count: int = 0
-    submissions: list = field(default_factory=list)
+    submissions: list[SubmissionSummary] = field(default_factory=list)
 
 
 def _assert_submission_rules(total_required_g: int, total_acquired_g: int) -> None:
@@ -147,7 +162,21 @@ def apply_staging_to_model(db: Session, model, scope: UserScope, selected: date)
             applied += 1
 
     state.staged_value_count = applied
-    state.submissions = staging_repo.submission_summary(db, selected.isoformat(), scope)
+    # NOTE: staged_value_count counts FIELDS overlaid above, not submissions.
+    # One submission covering three sectors makes it 3. Anything reporting
+    # "N submissions" must count state.submissions instead.
+    state.submissions = [
+        SubmissionSummary(
+            party_name=party_name,
+            operator_name=operator_name,
+            operator_email=operator_email,
+            submitted_at=submitted_at,
+            record_count=record_count,
+        )
+        for party_name, operator_name, operator_email, submitted_at, record_count in (
+            staging_repo.submission_summary(db, selected.isoformat(), scope)
+        )
+    ]
     # An operator who has submitted sees their own figures, locked.
     state.already_submitted = bool(
         not scope.unrestricted

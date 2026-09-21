@@ -9,7 +9,9 @@ suffix mirrors the database's `_g` suffix so the unit is never ambiguous.
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from schemas.staging import SubmissionSummaryRow
 
 
 class AllocationRowResponse(BaseModel):
@@ -100,4 +102,8 @@ class AllocationModelResponse(BaseModel):
     already_submitted: bool = False
     # How many fields on this screen came from an operator submission.
     staged_value_count: int = 0
+    # Who submitted for this date and when. ADMINISTRATORS ONLY — an operator
+    # receives an empty list even for their own submission. Note this is a list
+    # of submissions, while staged_value_count above counts fields.
+    submissions: list[SubmissionSummaryRow] = Field(default_factory=list)
     can_submit: bool = False

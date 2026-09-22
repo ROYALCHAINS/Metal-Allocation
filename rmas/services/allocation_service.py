@@ -46,6 +46,7 @@ from services.date_service import (
     previous_source_date,
     resolve_source_date,
 )
+from services.idempotency_service import replayable_result
 from services.exceptions import (
     DateAlreadySavedError,
     DateNotSavedError,
@@ -266,7 +267,38 @@ def _failure_reason(exc: Exception) -> str:
     return text[:1000] or "Unknown failure"
 
 
+SAVE_ENDPOINT = "POST /allocations"
+REVISE_ENDPOINT = "POST /allocations/revise"
+
+
+# Named once so the two directions cannot drift apart. Totals are integer
+# grams, so they round-trip through JSON exactly — no float, no rounding.
+_TOTALS_FIELDS = (
+    "total_previous_requirement_g",
+    "total_today_required_g",
+    "total_alloted_g",
+    "total_balance_g",
+    "total_acquired_g",
+    "remaining_to_allocate_g",
+)
+
+
+def _totals_json(totals: Totals) -> dict[str, int]:
+    return {field: getattr(totals, field) for field in _TOTALS_FIELDS}
+
+
+def _totals_from_json(data: dict) -> Totals:
+    return Totals(**{field: int(data[field]) for field in _TOTALS_FIELDS})
+
+
 def _serialise_result(result: SaveResult) -> str:
+    """The complete response, so a replay is indistinguishable from the original.
+
+    `totals` is included because the router needs it to build
+    SaveAllocationResponse — storing only the counts would make a replayed
+    response a different shape from the first one, which defeats the purpose
+    (CLAUDE.md rule 12).
+    """
     return json.dumps(
         {
             "allocation_date": result.allocation_date.isoformat(),
@@ -274,7 +306,19 @@ def _serialise_result(result: SaveResult) -> str:
             "flow_records": result.flow_records,
             "audit_id": result.audit_id,
             "request_id": result.request_id,
+            "totals": _totals_json(result.totals),
         }
+    )
+
+
+def _deserialise_save(data: dict) -> SaveResult:
+    return SaveResult(
+        allocation_date=date.fromisoformat(data["allocation_date"]),
+        allocation_records=int(data["allocation_records"]),
+        flow_records=int(data["flow_records"]),
+        audit_id=data["audit_id"],
+        request_id=data["request_id"],
+        totals=_totals_from_json(data["totals"]),
     )
 
 
@@ -313,9 +357,20 @@ def save_daily_allocation(
     """
     date_iso = selected.isoformat()
 
-    # 0. Double-click / retry protection.
+    # 0. Double-click / retry protection. A repeat inside the 900-second window
+    #    replays the original result rather than writing twice (rule 12); when
+    #    it cannot be replayed safely the caller still gets the duplicate error,
+    #    and nothing is written either way. See services/idempotency_service.py.
     existing = idempotency_repo.find_live_entry(db, request_id)
     if existing is not None:
+        replay = replayable_result(
+            existing, user_email=user.email, endpoint=SAVE_ENDPOINT
+        )
+        if replay is not None:
+            try:
+                return _deserialise_save(replay)
+            except (KeyError, TypeError, ValueError):
+                logger.warning("stored save result could not be rebuilt; refusing instead")
         raise DuplicateRequestError(
             "DUPLICATE_REQUEST",
             "This save request was already submitted. Reload the date to confirm the result.",
@@ -435,7 +490,7 @@ def save_daily_allocation(
 
         idempotency_repo.prune_expired(db)
         idempotency_repo.record(
-            db, request_id, user.email, "POST /allocations", _serialise_result(result)
+            db, request_id, user.email, SAVE_ENDPOINT, _serialise_result(result)
         )
         db.commit()
         return result
@@ -505,6 +560,56 @@ class CascadePreview:
     date_count: int
     sector_count: int
     negative_balance_dates: list[date]
+
+
+def _serialise_revision(result: RevisionResult) -> str:
+    """A revision's full response, cascade included.
+
+    The cascaded dates have to be carried: they are what the screen prints after
+    a revision ("3 later dates recalculated"), and a replay that dropped them
+    would report a revision as having touched nothing.
+    """
+    return json.dumps(
+        {
+            "allocation_date": result.allocation_date.isoformat(),
+            "revision_number": result.revision_number,
+            "allocation_records": result.allocation_records,
+            "flow_records": result.flow_records,
+            "audit_id": result.audit_id,
+            "request_id": result.request_id,
+            "totals": _totals_json(result.totals),
+            "cascaded": [
+                {
+                    "allocation_date": entry.allocation_date.isoformat(),
+                    "audit_id": entry.audit_id,
+                    "sectors_changed": entry.sectors_changed,
+                    "negative_balance_sectors": entry.negative_balance_sectors,
+                }
+                for entry in result.cascaded
+            ],
+        }
+    )
+
+
+def _deserialise_revision(data: dict) -> RevisionResult:
+    return RevisionResult(
+        allocation_date=date.fromisoformat(data["allocation_date"]),
+        revision_number=int(data["revision_number"]),
+        allocation_records=int(data["allocation_records"]),
+        flow_records=int(data["flow_records"]),
+        audit_id=data["audit_id"],
+        request_id=data["request_id"],
+        totals=_totals_from_json(data["totals"]),
+        cascaded=[
+            CascadedDate(
+                allocation_date=date.fromisoformat(entry["allocation_date"]),
+                audit_id=entry["audit_id"],
+                sectors_changed=int(entry["sectors_changed"]),
+                negative_balance_sectors=int(entry["negative_balance_sectors"]),
+            )
+            for entry in data["cascaded"]
+        ],
+    )
 
 
 @dataclass
@@ -775,7 +880,22 @@ def revise_daily_allocation(
     before_alloc = ""
     before_flow = ""
 
-    if idempotency_repo.find_live_entry(db, request_id) is not None:
+    existing = idempotency_repo.find_live_entry(db, request_id)
+    if existing is not None:
+        # Replayed BEFORE _assert_may_revise below, matching the save path's
+        # order — the stored result already proves the guards passed the first
+        # time, and re-running them would write a second UNAUTHORIZED_REVISION
+        # entry for what is one attempt the user made twice.
+        replay = replayable_result(
+            existing, user_email=user.email, endpoint=REVISE_ENDPOINT
+        )
+        if replay is not None:
+            try:
+                return _deserialise_revision(replay)
+            except (KeyError, TypeError, ValueError):
+                logger.warning(
+                    "stored revision result could not be rebuilt; refusing instead"
+                )
         raise DuplicateRequestError(
             "DUPLICATE_REQUEST",
             "This revision was already submitted. Reload the date to confirm the result.",
@@ -936,17 +1056,8 @@ def revise_daily_allocation(
             db,
             request_id,
             user.email,
-            "POST /allocations/revise",
-            _serialise_result(
-                SaveResult(
-                    allocation_date=selected,
-                    allocation_records=allocation_records,
-                    flow_records=flow_records,
-                    audit_id=audit_id,
-                    request_id=request_id,
-                    totals=normalized.totals,
-                )
-            ),
+            REVISE_ENDPOINT,
+            _serialise_revision(result),
         )
         db.commit()
         return result

@@ -10,6 +10,7 @@ preserves before-first ordering.
 import json
 
 from services.audit_report_service import (
+    format_audit_timestamp,
     decode_allocation_snapshot,
     decode_flow_snapshot,
     diff_allocation_snapshots,
@@ -163,3 +164,63 @@ def test_reason_preview_collapses_whitespace_and_caps_at_140() -> None:
     assert preview.endswith("…")
 
     assert preview_reason(None) == ""
+
+
+# ------------------------------------------------------- timestamp rendering
+#
+# Storage stays UTC (SQLite's datetime('now')); the display is Asia/Kolkata,
+# the application timezone. Resolved 2026-09-22. These had no coverage at all
+# before, which is how the two drifted apart unnoticed.
+
+
+def test_a_stored_utc_timestamp_displays_in_asia_kolkata() -> None:
+    # 13:09:13 UTC is 18:39:13 IST (+5:30).
+    assert format_audit_timestamp("2026-09-21 13:09:13") == "21-Sep-2026 18:39:13"
+
+
+def test_the_offset_rolls_the_DATE_over_not_just_the_clock() -> None:
+    """The case that made this visibly wrong rather than merely off by hours:
+    an evening submission in India was being filed under the previous day."""
+    assert format_audit_timestamp("2026-09-20 19:34:30") == "21-Sep-2026 01:04:30"
+
+
+def test_the_display_agrees_with_the_audit_id_it_sits_beside() -> None:
+    """generate_audit_id() has always stamped Asia/Kolkata, so before this fix
+    every row disagreed with itself: id AUD-20260921-183913 next to a column
+    reading 13:09:13. The id is the cross-check."""
+    assert format_audit_timestamp("2026-09-21 13:09:13").endswith("18:39:13")
+
+
+def test_an_explicit_offset_is_honoured_rather_than_assumed_utc() -> None:
+    """Naive values are read as UTC because that is what they are. A value that
+    already carries an offset is converted from that offset, so this stays
+    correct if the columns ever become offset-aware."""
+    assert format_audit_timestamp("2026-09-21T18:39:13+05:30") == "21-Sep-2026 18:39:13"
+    assert format_audit_timestamp("2026-09-21T13:09:13Z") == "21-Sep-2026 18:39:13"
+
+
+def test_asia_kolkata_has_no_dst_so_january_and_july_shift_alike() -> None:
+    """India does not observe DST, so the offset is a constant +5:30 — unlike a
+    timezone where a fixed conversion would be wrong for half the year."""
+    assert format_audit_timestamp("2026-01-15 12:00:00") == "15-Jan-2026 17:30:00"
+    assert format_audit_timestamp("2026-07-15 12:00:00") == "15-Jul-2026 17:30:00"
+
+
+def test_an_unparseable_or_absent_timestamp_still_degrades_gracefully() -> None:
+    """A compliance record must render even when one cell is malformed."""
+    assert format_audit_timestamp("not a timestamp") == "not a timestamp"
+    assert format_audit_timestamp("") == ""
+    assert format_audit_timestamp(None) == ""
+
+
+def test_the_month_name_does_not_follow_the_machine_locale() -> None:
+    """Spelled from a fixed table, not strftime('%b') — a compliance record must
+    not render differently on a differently-configured server."""
+    months = [
+        format_audit_timestamp(f"2026-{m:02d}-15 06:00:00").split("-")[1]
+        for m in range(1, 13)
+    ]
+    assert months == [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]

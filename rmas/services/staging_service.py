@@ -15,6 +15,7 @@ rules belong to the final commit, not to a requirement submission.
 """
 
 import json
+import logging
 import random
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -35,9 +36,15 @@ from services.exceptions import (
     ScopeError,
     ValidationError,
 )
+from services.idempotency_service import replayable_result
 from services.scope_service import UserScope, is_administrator
 from services.validation_service import assert_valid_weight
 from services.weight_service import grams_to_kg
+
+
+logger = logging.getLogger(__name__)
+
+SUBMIT_ENDPOINT = "submit_requirements"
 
 
 def generate_submission_id() -> str:
@@ -55,6 +62,19 @@ class SubmissionResult:
     total_required_g: int
     total_acquired_g: int
     audit_id: str
+
+
+def _deserialise_submission(data: dict) -> SubmissionResult:
+    """Rebuild a stored submission response for a replayed request_id (rule 12)."""
+    return SubmissionResult(
+        allocation_date=date.fromisoformat(data["allocation_date"]),
+        submission_id=data["submission_id"],
+        allocation_records=int(data["allocation_records"]),
+        flow_records=int(data["flow_records"]),
+        total_required_g=int(data["total_required_g"]),
+        total_acquired_g=int(data["total_acquired_g"]),
+        audit_id=data["audit_id"],
+    )
 
 
 @dataclass
@@ -209,8 +229,26 @@ def submit_requirements(
     # and the failure audit below runs precisely on that path.
     operator_email = user.email
 
-    # 1. Double-click / retry protection.
-    if idempotency_repo.find_live_entry(db, request_id) is not None:
+    # 1. Double-click / retry protection. A repeat inside the 900-second window
+    #    replays the original result rather than sending twice (rule 12).
+    #
+    #    Worth being clear about what this does NOT change: a blocked
+    #    resubmission still consumes its request_id, so an immediate identical
+    #    retry after ALREADY_SUBMITTED replays nothing and returns
+    #    DUPLICATE_REQUEST — the failure path never records a result to replay.
+    #    Only a submission that actually succeeded can be replayed.
+    existing = idempotency_repo.find_live_entry(db, request_id)
+    if existing is not None:
+        replay = replayable_result(
+            existing, user_email=operator_email, endpoint=SUBMIT_ENDPOINT
+        )
+        if replay is not None:
+            try:
+                return _deserialise_submission(replay)
+            except (KeyError, TypeError, ValueError):
+                logger.warning(
+                    "stored submission result could not be rebuilt; refusing instead"
+                )
         raise DuplicateRequestError(
             "DUPLICATE_REQUEST",
             "This submission was already sent. Reload the date to confirm.",
@@ -365,12 +403,20 @@ def submit_requirements(
             db,
             request_id,
             user_email=operator_email,
-            endpoint="submit_requirements",
+            endpoint=SUBMIT_ENDPOINT,
+            # The COMPLETE response, so a replay is indistinguishable from the
+            # original: the screen prints the two totals and the audit id back
+            # to the operator, and a replay that dropped them would report a
+            # successful submission as having carried nothing.
             response_json=json.dumps(
                 {
+                    "allocation_date": date_iso,
                     "submission_id": submission_id,
                     "allocation_records": len(allocation_rows),
                     "flow_records": len(flow_rows),
+                    "total_required_g": total_required_g,
+                    "total_acquired_g": total_acquired_g,
+                    "audit_id": audit_id,
                 }
             ),
         )

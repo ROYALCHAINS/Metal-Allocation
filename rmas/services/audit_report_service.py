@@ -17,12 +17,14 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from repository import audit_repo
 from services.audit_service import ACTION_REVISE, ACTION_SAVE
+from services.date_service import APP_TIMEZONE
 from services.validation_service import nearly_equal_g, normalize_key
 from services.weight_service import kg_to_grams
 
@@ -247,16 +249,30 @@ def preview_reason(reason: str | None) -> str:
 
 
 def format_audit_timestamp(stored: str | None) -> str:
-    """Ports formatAuditTimestamp_(): 'dd-MMM-yyyy HH:mm:ss'.
+    """Ports formatAuditTimestamp_(): 'dd-MMM-yyyy HH:mm:ss', in Asia/Kolkata.
 
     The month abbreviation is spelled out from a fixed table rather than
     strftime('%b'), which follows the machine locale and would render a
     compliance record differently on a differently-configured server.
 
-    NOTE: the stored value comes from SQLite's datetime('now'), which is UTC,
-    while the application timezone is Asia/Kolkata. That gap is pre-existing
-    and is flagged rather than silently corrected here — fixing it means
-    changing how the column is written, not how it is displayed.
+    TIMEZONE — resolved 2026-09-22. Every timestamp column defaults to SQLite's
+    datetime('now'), which is UTC, while the application timezone is
+    Asia/Kolkata; readers were being shown times 5h30m behind the events they
+    describe. The decision was to keep STORAGE uniformly UTC — one timezone in
+    the column, correctly sortable, DST-proof — and convert here, at the one
+    place every displayed timestamp passes through (the audit list and detail,
+    the submission banner, and both dates in the revision summary).
+
+    Storage is deliberately NOT changed. The audit log's append-only triggers
+    forbid UPDATE, so its existing rows could never be rewritten to match a new
+    convention; writing local time from now on would leave one column holding
+    two timezones with nothing marking the boundary, and sorting across it would
+    be wrong. Every stored value stays UTC, so every row — old and new — renders
+    correctly through this function.
+
+    A naive value is therefore read as UTC, which is what it is. A value that
+    already carries an offset is honoured as given, so this stays correct if the
+    columns ever do become offset-aware.
     """
     text = (stored or "").strip()
     if not text:
@@ -265,6 +281,9 @@ def format_audit_timestamp(stored: str | None) -> str:
         stamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return text
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    stamp = stamp.astimezone(ZoneInfo(APP_TIMEZONE))
     return (
         f"{stamp.day:02d}-{_MONTHS[stamp.month - 1]}-{stamp.year} "
         f"{stamp.hour:02d}:{stamp.minute:02d}:{stamp.second:02d}"

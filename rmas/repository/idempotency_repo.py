@@ -8,18 +8,24 @@ request_id within REQUEST_ID_TTL_SECONDS (900) must not write twice
 
 SQLite has no TTL of its own, so expired rows are pruned on write.
 
-DIVERGENCE FROM LEGACY — what a duplicate returns.
+DIVERGENCE FROM LEGACY — what a duplicate returns. RESOLVED 2026-09-22.
 Legacy stores only the marker '1' in the cache and answers a repeat with an
 ERROR: response_(false, 'DUPLICATE_REQUEST', 'This save request was already
-submitted. Reload the date to confirm the result.').
+submitted. Reload the date to confirm the result.'). It could not do otherwise —
+Apps Script's CacheService held a marker, not a response, so replaying was never
+available to it. That makes the error a limitation rather than a decision.
 
-CLAUDE.md rule 12 instead says a repeat "returns the original result rather than
+CLAUDE.md rule 12 says a repeat "returns the original result rather than
 double-writing", and schema.sql gives `request_log` a `response_json` column for
-exactly that. Two of the project's own documents describe replaying the result,
-against one legacy behaviour that looks like a limitation of Apps Script's cache
-rather than a decision. The documented behaviour is implemented here — a repeat
-replays the stored response — and the divergence is flagged rather than hidden.
-Say so if the legacy error response is wanted instead.
+exactly that. Both were adopted: a repeat now REPLAYS the stored response, so a
+double-clicked save shows the same success twice instead of a red error after a
+save that actually worked.
+
+This module still only STORES and FINDS. Which repeats may be answered with a
+stored result — never across accounts, never across endpoints, never from an
+unreadable record — is policy, and lives in services/idempotency_service.py.
+A repeat that cannot be replayed safely still raises DUPLICATE_REQUEST, so
+refusing to replay is never the same as permitting a second write.
 """
 
 from datetime import datetime, timedelta, timezone

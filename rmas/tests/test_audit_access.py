@@ -356,5 +356,7 @@ def test_the_revision_summary_is_deliberately_not_admin_gated(client, db_session
 
     summary = response.json()["revision_summary"]
     assert summary["originally_saved_by"] == "admin@royalchains.com"
-    assert summary["originally_saved_at_display"] == "01-Sep-2026 10:00:00"
+    # Stored as '2026-09-01 10:00:00' UTC by the fixture; displayed in the
+    # application timezone, Asia/Kolkata (UTC+5:30) — resolved 2026-09-22.
+    assert summary["originally_saved_at_display"] == "01-Sep-2026 15:30:00"
     assert summary["message"] == "This date has not been revised."

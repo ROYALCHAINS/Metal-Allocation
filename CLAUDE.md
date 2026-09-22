@@ -301,6 +301,16 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
    specifically to survive DST and UTC rollover; a proper `DATE` column supersedes that
    hack, but never reintroduce a timezone-naive datetime.
 7. Application timezone is **Asia/Kolkata**.
+    - **Timestamps are STORED in UTC and DISPLAYED in Asia/Kolkata — resolved
+      2026-09-22.** Every `datetime('now')` column (both ledgers' `saved_at`,
+      `submitted_at`, `action_timestamp`, the `created_at` columns) is UTC, and the
+      conversion happens in `services/audit_report_service.format_audit_timestamp()`,
+      the one function every displayed timestamp passes through.
+    - Storage is deliberately **not** changed to local time. The audit log's
+      append-only triggers forbid `UPDATE`, so its existing rows could never be
+      rewritten to match a new convention; writing local time from now on would leave
+      one column holding two timezones with nothing marking the boundary, and sorting
+      across it would be wrong. Keep storage uniformly UTC and convert at the edge.
 
 ### Identity, scope and authorisation
 
@@ -333,6 +343,16 @@ Currently enabled and to be preserved: `ALLOW_ZERO_PREVIOUS_REQUIREMENT`,
 12. **Preserve request-ID idempotency.** Clients send a `request_id`; a repeat within
     the 900-second window returns the original result rather than double-writing. This
     guards against double-clicks and retries.
+    - **Implemented as a replay, resolved 2026-09-22** — a deliberate divergence from
+      legacy, which returns `DUPLICATE_REQUEST`. Legacy could not replay: Apps Script's
+      `CacheService` held the marker `'1'`, not a response, so its error is a limitation
+      rather than a decision. Do not "restore" the error.
+    - Three repeats are still refused rather than replayed, and each guard is
+      load-bearing: a **different account** (`request_id` is browser-generated and
+      guessable, so replaying would disclose another user's result), a **different
+      endpoint** (the three write paths store three different shapes), and an
+      **unreadable stored record** (rows from an older build). The policy lives in
+      `services/idempotency_service.py`; refusing to replay never permits a second write.
 
 ### Audit
 

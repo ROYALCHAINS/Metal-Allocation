@@ -22,6 +22,7 @@ from sqlalchemy.pool import StaticPool
 
 from database import Base, get_db
 from main import app
+from models.audit import MetalAllocationAuditLog
 from models.party import Party
 from models.sector import FlowSector, Sector
 from models.staging import MetalRequirementStaging
@@ -307,7 +308,9 @@ def test_submitting_another_party_sector_is_a_trespass(client, db_session) -> No
     assert response.json()["detail"]["code"] == "SECTOR_NOT_IN_SCOPE"
 
 
-def test_a_repeated_request_id_is_refused(client, db_session) -> None:
+def test_a_repeated_request_id_from_another_account_is_refused(client, db_session) -> None:
+    """Never replay across accounts: request_id comes from the browser, so it is
+    guessable, and the stored result carries another operator's figures."""
     _add_user(db_session, "op@royalchains.com", party_name="Royal Chain")
     _add_user(db_session, "other@royalchains.com", party_name="Aalishaan")
     _login(client, "op@royalchains.com")
@@ -317,6 +320,33 @@ def test_a_repeated_request_id_is_refused(client, db_session) -> None:
     replay = _submit(client, db_session, "Aalishaan", request_id="REQ-1")
     assert replay.status_code == 409
     assert replay.json()["detail"]["code"] == "DUPLICATE_REQUEST"
+
+
+def test_a_repeated_request_id_replays_the_operators_own_submission(
+    client, db_session
+) -> None:
+    """A double-clicked Submit shows the same confirmation twice rather than an
+    error, and stages nothing a second time (CLAUDE.md rule 12)."""
+    _add_user(db_session, "op@royalchains.com", party_name="Royal Chain")
+    _login(client, "op@royalchains.com")
+
+    first = _submit(client, db_session, "Royal Chain", request_id="REQ-DOUBLE")
+    assert first.status_code == 200
+    staged_after_first = db_session.query(MetalRequirementStaging).count()
+
+    second = _submit(client, db_session, "Royal Chain", request_id="REQ-DOUBLE")
+
+    assert second.status_code == 200, "a replay, not the one-shot rejection"
+    assert second.json() == first.json(), "byte-identical, including the totals"
+    assert db_session.query(MetalRequirementStaging).count() == staged_after_first
+
+    # And the replay is a replay, not a second submission: one audit entry.
+    submits = (
+        db_session.query(MetalAllocationAuditLog)
+        .filter(MetalAllocationAuditLog.action_type == "SUBMIT_REQUIREMENT")
+        .count()
+    )
+    assert submits == 1
 
 
 # --------------------------------------------------- the administrator's view

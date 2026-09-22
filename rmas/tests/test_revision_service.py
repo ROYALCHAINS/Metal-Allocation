@@ -411,18 +411,60 @@ def test_revision_disabled_refuses_and_writes_no_audit(db, monkeypatch) -> None:
 
 
 def test_a_repeated_request_id_does_not_revise_twice(db) -> None:
-    """Unlike save, there is no date_exists check to catch a double click."""
+    """Unlike save, there is no date_exists check to catch a double click.
+
+    Resolved 2026-09-22: the repeat now REPLAYS the first result (rule 12)
+    rather than erroring. The figures sent the second time are deliberately
+    DIFFERENT here — a replay must return the original outcome and ignore them
+    completely, which is the strongest statement that nothing was re-evaluated.
+    """
     user = _user(db)
     _save_day(db, SAT, {"RC Customer Orders": (0, 5_000, 0)})
     _save_day(db, MON, {"RC Customer Orders": (5_000, 0, 0)})
 
-    _revise(db, user, SAT, {"RC Customer Orders": ("9.000", "0.000")}, request_id="REQ-X")
-    with pytest.raises(DuplicateRequestError):
-        _revise(db, user, SAT, {"RC Customer Orders": ("1.000", "0.000")}, request_id="REQ-X")
+    first = _revise(
+        db, user, SAT, {"RC Customer Orders": ("9.000", "0.000")}, request_id="REQ-X"
+    )
+    second = _revise(
+        db, user, SAT, {"RC Customer Orders": ("1.000", "0.000")}, request_id="REQ-X"
+    )
 
+    assert second.audit_id == first.audit_id, "the ORIGINAL revise entry"
+    assert second.revision_number == first.revision_number
+    assert second.totals == first.totals
+    # The cascade has to survive the round trip too, or a replayed revision
+    # would report itself as having touched no later dates.
+    assert [c.allocation_date for c in second.cascaded] == [
+        c.allocation_date for c in first.cascaded
+    ]
+    assert [c.audit_id for c in second.cascaded] == [c.audit_id for c in first.cascaded]
+    assert [c.sectors_changed for c in second.cascaded] == [
+        c.sectors_changed for c in first.cascaded
+    ]
+
+    # Nothing was written a second time, and the 1.000 kg above was ignored.
     assert _actions(db).count("REVISE") == 1
     assert _actions(db).count("RECALCULATE") == 1
     assert _rows(db, SAT)["RC Customer Orders"].revision_number == 1
+    assert _rows(db, SAT)["RC Customer Orders"].today_required_g == 9_000
+
+
+def test_a_replayed_revision_writes_no_unauthorized_entry(db) -> None:
+    """The replay happens BEFORE the administrator check, deliberately.
+
+    The stored result already proves the guards passed the first time, so
+    re-running them would write a second audit entry for what is one attempt the
+    user made twice.
+    """
+    user = _user(db)
+    _save_day(db, SAT, {"RC Customer Orders": (0, 5_000, 0)})
+
+    _revise(db, user, SAT, {"RC Customer Orders": ("9.000", "0.000")}, request_id="REQ-Y")
+    _revise(db, user, SAT, {"RC Customer Orders": ("9.000", "0.000")}, request_id="REQ-Y")
+
+    assert _actions(db).count("UNAUTHORIZED_REVISION") == 0
+    assert _actions(db).count("FAILED_REVISION") == 0
+    assert _actions(db).count("REVISE") == 1
 
 
 # ------------------------------------------------------------------- the rest

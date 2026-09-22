@@ -146,3 +146,74 @@
    than indented, so the parties read as a column. */
 .submission-line { margin-top: 4px; }
 .submission-line:first-of-type { margin-top: 8px; }
+
+/* --------------------- TOAST ADDITIONS (no legacy overrides) ---------------
+   Toasts no longer expire, so they need a way out and a ceiling. Everything
+   here is a NEW class applied ALONGSIDE the ported .toast-stack / .toast from
+   tokens.css — none of those rules is redefined, so the visual contract stays
+   byte-identical (CLAUDE.md section 7). Colour comes entirely from the ported
+   .toast--* backgrounds, which is why nothing here sets one. */
+
+/* The stack can now grow, so cap it and let it scroll rather than running off
+   the top of the viewport where the oldest toast could never be reached. */
+.toast-stack--managed {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Room for the close buttons' focus rings against the viewport edge. */
+  padding: 2px;
+}
+
+/* Floated, not flexed: floating keeps the ported .toast a plain block, so its
+   rule needs no override. The button is first in the DOM for the float to
+   take the text with it. */
+.toast__close {
+  float: right;
+  margin: -2px -2px 0 10px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.toast__close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  opacity: 1;
+}
+.toast__close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.toast__text {
+  /* Keeps a long message from flowing under the floated button on its last
+     line, which would otherwise leave the text visually ragged. */
+  display: block;
+  overflow: hidden;
+}
+
+/* Only rendered once two or more toasts are waiting. */
+.toast-stack__clear {
+  align-self: flex-end;
+  border: 1px solid var(--slate-300);
+  border-radius: 999px;
+  padding: 3px 11px;
+  background: var(--white);
+  color: var(--slate-700);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+.toast-stack__clear:hover {
+  /* --grey-050, the same hover ground the ported .btn uses. --slate-100 does
+     not exist in tokens.css; inventing a token here would put a colour outside
+     the palette. */
+  background: var(--grey-050);
+}

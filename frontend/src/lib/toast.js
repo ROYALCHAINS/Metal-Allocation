@@ -14,19 +14,33 @@
  * that happened on somebody else's screen; the authoritative view is always the
  * Daily Allocation screen or the Audit Log. Anything that would be lost if the
  * toast were missed does not belong here.
+ *
+ * TOASTS DO NOT EXPIRE. They stay until the reader closes one, on request. That
+ * inverts the usual trade-off — nothing is missed by looking away, but nothing
+ * clears itself either — so every toast carries a close button, the stack
+ * scrolls rather than growing past the top of the viewport, and a "Dismiss all"
+ * appears once more than one is waiting. No toast is ever removed without a
+ * click.
+ *
+ * STYLING NOTE. .toast-stack and .toast are legacy classes from the ported
+ * tokens.css, which must not be overridden outside theme.css (CLAUDE.md
+ * section 7). Everything added here is therefore a NEW class applied ALONGSIDE
+ * them — .toast-stack--managed, .toast__close, .toast__text — so the ported
+ * rules still apply untouched and the additions only add.
  */
 
 const STACK_ID = 'toastStack';
-const DEFAULT_MS = 7000;
-/** Beyond this, older toasts are dropped rather than filling the viewport. */
-const MAX_VISIBLE = 4;
+/** 0 = stay until dismissed. A caller may still pass a duration. */
+const DEFAULT_MS = 0;
 
 function stack() {
   let node = document.getElementById(STACK_ID);
   if (!node) {
     node = document.createElement('div');
     node.id = STACK_ID;
-    node.className = 'toast-stack';
+    // The ported class plus our own: the second adds scrolling and spacing for
+    // a stack that no longer empties itself.
+    node.className = 'toast-stack toast-stack--managed';
     node.setAttribute('role', 'status');
     node.setAttribute('aria-live', 'polite');
     // Appended to <body>, not to the view container: a view is re-rendered on
@@ -34,6 +48,36 @@ function stack() {
     document.body.appendChild(node);
   }
   return node;
+}
+
+/**
+ * Show or hide the "Dismiss all" control.
+ *
+ * It only earns its place once toasts are actually accumulating, which they can
+ * now that none expire — with one on screen the per-toast close button is
+ * quicker than reading a second control.
+ */
+function syncDismissAll(host) {
+  const toasts = host.querySelectorAll('.toast');
+  let clear = host.querySelector('.toast-stack__clear');
+
+  if (toasts.length < 2) {
+    if (clear) clear.remove();
+    return;
+  }
+  if (!clear) {
+    clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'toast-stack__clear';
+    clear.addEventListener('click', () => {
+      host.querySelectorAll('.toast').forEach((t) => t.remove());
+      syncDismissAll(host);
+    });
+    // First child, so it sits above the stack and does not move as toasts
+    // arrive underneath it.
+    host.insertBefore(clear, host.firstChild);
+  }
+  clear.textContent = `Dismiss all (${toasts.length})`;
 }
 
 /**
@@ -48,17 +92,31 @@ function stack() {
 export function showToast(message, kind = 'info', durationMs = DEFAULT_MS) {
   const host = stack();
 
-  while (host.children.length >= MAX_VISIBLE) {
-    host.removeChild(host.firstChild);
-  }
-
   const toast = document.createElement('div');
   toast.className = `toast toast--${kind}`;
-  toast.textContent = message;
-  toast.title = 'Dismiss';
-  toast.addEventListener('click', () => dismiss(toast));
-  host.appendChild(toast);
 
+  // The button comes FIRST in the DOM so it can float right and have the text
+  // flow around it — which is what lets the ported .toast rule stay untouched
+  // rather than being overridden to a flex container.
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast__close';
+  close.setAttribute('aria-label', 'Dismiss notification');
+  close.title = 'Dismiss';
+  close.textContent = '×';
+  close.addEventListener('click', () => dismiss(toast));
+
+  const text = document.createElement('span');
+  text.className = 'toast__text';
+  // textContent, never innerHTML: the message names a person and a date that
+  // come from the database.
+  text.textContent = message;
+
+  toast.append(close, text);
+  host.appendChild(toast);
+  syncDismissAll(host);
+
+  // Only when a caller asks for one. The default is 0 — stay until dismissed.
   if (durationMs > 0) {
     setTimeout(() => dismiss(toast), durationMs);
   }
@@ -66,7 +124,10 @@ export function showToast(message, kind = 'info', durationMs = DEFAULT_MS) {
 }
 
 function dismiss(toast) {
-  if (toast.parentNode) toast.parentNode.removeChild(toast);
+  const host = toast.parentNode;
+  if (!host) return;
+  host.removeChild(toast);
+  syncDismissAll(host);
 }
 
 /** Map a server event kind onto a toast colour. */

@@ -91,8 +91,20 @@ export function renderDashboard(container, user) {
   });
 }
 
-/** How often to ask the server whether anything happened elsewhere. */
-const POLL_MS = 20000;
+/**
+ * How often to ask the server whether anything happened elsewhere.
+ *
+ * 5 seconds, so a notification lands while the other person is still at their
+ * desk rather than a third of a minute later. The cost is one indexed query
+ * per signed-in client per tick — the roster is a handful of people, and the
+ * query is a bounded range scan on the audit log's primary key, so the extra
+ * traffic is not worth trading for a slower notice.
+ *
+ * Revisit this before any large deployment: the cost scales with the number of
+ * signed-in clients, not with activity, so a hundred idle tabs would poll a
+ * hundred times every five seconds for nothing.
+ */
+const POLL_MS = 5000;
 
 /**
  * Toast anything that happens on somebody else's screen: an operator's

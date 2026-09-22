@@ -23,7 +23,9 @@ import { escapeHtml } from '../components/appHeader.js';
 import { bindFilterBar, isoDaysAgo, renderFilterBar, todayIso } from '../components/filterBar.js';
 import { fmt3 } from '../lib/format.js';
 
-const PAGE_SIZE = 100;
+// 50 rows per page. The server accepts any limit from 1..3000 and falls back
+// to its own page size outside that, so this is the client's choice alone.
+const PAGE_SIZE = 50;
 
 const STATUS_OPTIONS = [
   ['all', 'All records'],
@@ -122,6 +124,27 @@ export function renderAllocationHistoryView(container) {
     offset = 0;
     load();
   });
+
+  /**
+   * Move by whole pages. `delta` is in pages, not rows, so the two buttons
+   * cannot drift apart from PAGE_SIZE.
+   *
+   * Clamped at zero: a Previous on the first page would otherwise send a
+   * negative offset, which the server silently corrects to 0 — better not to
+   * ask. The buttons are also disabled from the server's has_previous/has_next,
+   * so this is the second line of defence, not the first.
+   */
+  function goToPage(delta) {
+    const next = offset + delta * PAGE_SIZE;
+    offset = Math.max(0, next);
+    load();
+    // The table is below the fold on a long page; without this the reader is
+    // left staring at an unchanged filter card wondering whether it worked.
+    $('ahTableWrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  $('ahPrev').addEventListener('click', () => goToPage(-1));
+  $('ahNext').addEventListener('click', () => goToPage(1));
 
   function renderRows(rows) {
     const hasRows = rows.length > 0;

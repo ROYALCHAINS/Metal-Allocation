@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RMAS — Project Status Audit</title>
+<style>
+/* ---------------------------------------------------------------------------
+   PROJECT_STATUS_2026-09-22.html
+   Royal Metal Allocation System — read-only status audit, 2026-09-22.
+
+   Standalone by design: no external stylesheet, no font CDN, no script. It can
+   be opened from disk, emailed, or printed without anything resolving over the
+   network. The palette mirrors frontend/src/styles/tokens.css so the document
+   reads as part of the project rather than as a generic report; it does NOT
+   import that file, because a status snapshot must not change appearance when
+   the application's visual contract is edited later.
+--------------------------------------------------------------------------- */
+
+:root{
+  --navy-900:#0b1623; --navy-800:#16283d; --navy-700:#1e3857; --navy-100:#e9eff7;
+  --gold-600:#a87f30; --gold-500:#c89d47; --gold-400:#dcb15b; --gold-300:#edd085;
+  --gold-100:#fdf6e7; --gold-050:#fffbf2;
+  --slate-900:#0f172a; --slate-700:#334155; --slate-500:#64748b; --slate-300:#cbd5e1;
+  --green-700:#047857; --green-600:#059669; --green-100:#d1fae5; --emerald-050:#ecfdf5;
+  --amber-700:#92400e; --amber-600:#f59e0b; --amber-100:#fef3c7; --amber-050:#fffbeb;
+  --red-700:#b91c1c;   --red-600:#e11d48;  --red-100:#fee2e2;
+  --blue-800:#1e40af;  --blue-600:#2563eb; --blue-100:#dbeafe; --blue-050:#eff6ff;
+
+  --ink:var(--slate-900); --ink-soft:var(--slate-700); --ink-faint:var(--slate-500);
+  --page:#f1f4f8; --surface:#ffffff; --surface-2:#f8fafc; --line:#e2e8f0;
+  --shadow:0 1px 2px rgba(15,23,42,.06), 0 4px 14px rgba(15,23,42,.05);
+  --mono:ui-monospace,"JetBrains Mono","SFMono-Regular",Menlo,Consolas,monospace;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,Roboto,Arial,sans-serif;
+}
+
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#e8eef6; --ink-soft:#b6c2d2; --ink-faint:#8899ad;
+    --page:#0a1017; --surface:#121b26; --surface-2:#17222f; --line:#26374a;
+    --navy-100:#1b2b40;
+    --gold-100:#2a2213; --gold-050:#221c10;
+    --green-100:#0c3a2c; --emerald-050:#0a2c22;
+    --amber-100:#3a2c0c; --amber-050:#2b210a;
+    --red-100:#3b1420;
+    --blue-100:#132747; --blue-050:#0f1f38;
+    --green-700:#5fd6a6; --amber-700:#f0b752; --red-700:#f4919c; --blue-800:#8ab4ff;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 6px 20px rgba(0,0,0,.35);
+  }
+}
+
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0; background:var(--page); color:var(--ink);
+  font-family:var(--sans); font-size:15px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ----------------------------------------------------------------- header */
+.masthead{
+  background:linear-gradient(160deg,var(--navy-900),var(--navy-800) 62%,var(--navy-700));
+  color:#fff; border-bottom:3px solid var(--gold-500);
+}
+.masthead__inner{max-width:1120px;margin:0 auto;padding-block:38px;padding-left:20px;padding-right:20px;}
+.eyebrow{
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+  color:var(--gold-300);margin:0 0 10px;
+}
+.masthead h1{margin:0;font-size:clamp(25px,4.4vw,40px);line-height:1.15;font-weight:800;letter-spacing:-.015em;}
+.masthead__sub{margin:12px 0 0;color:#c3d0e0;max-width:64ch;font-size:15.5px;}
+.factbar{
+  display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;
+}
+.fact{
+  background:rgba(255,255,255,.07);border:1px solid rgba(232,177,91,.28);
+  border-radius:999px;padding:5px 13px;font-size:12.5px;color:#e6edf6;
+}
+.fact b{color:var(--gold-300);font-weight:700;}
+.revised{
+  margin:16px 0 0;padding:11px 15px;max-width:74ch;font-size:13.5px;line-height:1.55;
+  background:rgba(232,177,91,.10);border-left:3px solid var(--gold-400);
+  border-radius:0 8px 8px 0;color:#e6edf6;
+}
+.revised code{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.18);color:#f0e4c8;}
+.revised .s{vertical-align:baseline;}
+
+/* ------------------------------------------------------------------ shell */
+.shell{max-width:1120px;margin:0 auto;padding-block:30px;padding-left:20px;padding-right:20px;}
+
+/* -------------------------------------------------------------------- toc */
+.toc{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  box-shadow:var(--shadow);padding:18px 20px;margin-bottom:30px;
+}
+.toc h2{margin:0 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);}
+.toc ol{margin:0;padding:0;list-style:none;display:grid;gap:4px 22px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));counter-reset:toc;}
+.toc li{counter-increment:toc;font-size:14px;}
+.toc a{color:var(--ink-soft);text-decoration:none;display:block;padding:3px 0;}
+.toc a::before{content:counter(toc) ". ";color:var(--gold-600);font-variant-numeric:tabular-nums;font-weight:700;}
+.toc a:hover{color:var(--blue-800);}
+
+/* ---------------------------------------------------------------- section */
+section{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  box-shadow:var(--shadow);padding:26px 26px 30px;margin-bottom:22px;scroll-margin-top:16px;
+}
+section > h2{
+  margin:0 0 4px;font-size:21px;font-weight:800;letter-spacing:-.01em;
+  display:flex;align-items:baseline;gap:11px;flex-wrap:wrap;
+}
+.num{
+  font-family:var(--mono);font-size:12px;font-weight:700;color:var(--gold-600);
+  background:var(--gold-100);border:1px solid var(--gold-300);border-radius:6px;
+  padding:2px 8px;flex:none;
+}
+.lede{color:var(--ink-faint);margin:0 0 20px;font-size:13.5px;}
+h3{margin:26px 0 10px;font-size:15.5px;font-weight:700;color:var(--ink);}
+h3:first-of-type{margin-top:18px;}
+h4{margin:18px 0 8px;font-size:13.5px;font-weight:700;color:var(--ink-soft);}
+p{margin:0 0 13px;}
+ul,ol{margin:0 0 13px;padding-left:22px;}
+li{margin-bottom:5px;}
+a{color:var(--blue-800);}
+code{
+  font-family:var(--mono);font-size:.875em;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere;
+}
+pre{
+  font-family:var(--mono);font-size:12.5px;line-height:1.55;background:var(--navy-900);
+  color:#dbe6f2;border-radius:9px;padding:14px 16px;overflow-x:auto;margin:0 0 16px;
+}
+pre code{background:none;border:0;padding:0;color:inherit;font-size:inherit;}
+strong{font-weight:700;}
+
+/* ----------------------------------------------------------------- tables */
+.scroll{overflow-x:auto;margin:0 0 18px;border:1px solid var(--line);border-radius:10px;}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:540px;}
+thead th{
+  background:var(--navy-800);color:#fff;text-align:left;font-weight:600;
+  padding:9px 12px;white-space:nowrap;font-size:12px;letter-spacing:.02em;
+  position:sticky;top:0;
+}
+tbody td{padding:9px 12px;border-top:1px solid var(--line);vertical-align:top;}
+tbody tr:nth-child(even){background:var(--surface-2);}
+td code{white-space:nowrap;}
+.t-narrow{min-width:0;}
+caption{caption-side:bottom;text-align:left;padding:9px 12px;font-size:12px;color:var(--ink-faint);}
+
+/* ------------------------------------------------------------------ chips */
+.s{
+  display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;
+  border-radius:999px;padding:2px 9px;white-space:nowrap;border:1px solid transparent;
+}
+.s-ok     {background:var(--green-100); color:var(--green-700); border-color:rgba(5,150,105,.35);}
+.s-part   {background:var(--amber-100); color:var(--amber-700); border-color:rgba(245,158,11,.4);}
+.s-plan   {background:var(--blue-100);  color:var(--blue-800);  border-color:rgba(37,99,235,.3);}
+.s-none   {background:var(--surface-2); color:var(--ink-faint); border-color:var(--line);}
+.s-block  {background:var(--red-100);   color:var(--red-700);   border-color:rgba(225,29,72,.35);}
+.s-crit   {background:var(--red-100);   color:var(--red-700);   border-color:rgba(225,29,72,.45);}
+.s-high   {background:var(--amber-100); color:var(--amber-700); border-color:rgba(245,158,11,.45);}
+.s-med    {background:var(--blue-100);  color:var(--blue-800);  border-color:rgba(37,99,235,.3);}
+.s-low    {background:var(--surface-2); color:var(--ink-faint); border-color:var(--line);}
+.s-on     {background:var(--green-100); color:var(--green-700); border-color:rgba(5,150,105,.35);}
+.s-off    {background:var(--surface-2); color:var(--ink-faint); border-color:var(--line);}
+.s-inert  {background:var(--surface-2); color:var(--ink-faint); border-color:var(--line);font-style:italic;}
+/* Marks what changed between the original audit and this revision. */
+.s-new    {background:var(--green-100); color:var(--green-700); border-color:rgba(5,150,105,.45);}
+.was{color:var(--ink-faint);text-decoration:line-through;}
+
+/* ------------------------------------------------------------------ notes */
+.note{
+  border-left:4px solid var(--blue-600);background:var(--blue-050);
+  border-radius:0 9px 9px 0;padding:14px 18px;margin:0 0 18px;
+}
+.note--crit{border-left-color:var(--red-600);background:var(--red-100);}
+.note--warn{border-left-color:var(--amber-600);background:var(--amber-050);}
+.note--ok{border-left-color:var(--green-600);background:var(--emerald-050);}
+.note__title{font-weight:700;margin:0 0 6px;font-size:14px;display:flex;align-items:center;gap:8px;}
+.note p:last-child{margin-bottom:0;}
+.note__title .s{font-size:10px;}
+
+/* ------------------------------------------------------------------- kpis */
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin:0 0 22px;}
+.kpi{
+  background:var(--surface-2);border:1px solid var(--line);border-top:3px solid var(--gold-500);
+  border-radius:10px;padding:14px 16px;
+}
+.kpi__label{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:700;}
+.kpi__value{font-family:var(--mono);font-size:25px;font-weight:700;line-height:1.25;margin-top:5px;}
+.kpi__sub{font-size:11.5px;color:var(--ink-faint);margin-top:3px;}
+.kpi--warn{border-top-color:var(--amber-600);}
+.kpi--bad{border-top-color:var(--red-600);}
+.kpi--good{border-top-color:var(--green-600);}
+
+/* ------------------------------------------------------------------- misc */
+.two-col{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));}
+.tree{font-family:var(--mono);font-size:12.5px;line-height:1.72;background:var(--surface-2);
+      border:1px solid var(--line);border-radius:9px;padding:14px 16px;overflow-x:auto;margin:0 0 18px;
+      white-space:pre;}
+.tree b{color:var(--gold-600);font-weight:700;}
+.tree i{color:var(--ink-faint);font-style:normal;}
+details{border:1px solid var(--line);border-radius:9px;margin:0 0 18px;background:var(--surface-2);}
+summary{cursor:pointer;padding:11px 16px;font-weight:700;font-size:13.5px;}
+summary::marker{color:var(--gold-600);}
+details[open] summary{border-bottom:1px solid var(--line);}
+details .scroll{margin:0;border:0;border-radius:0 0 9px 9px;}
+.erd{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:14px;margin:0 0 10px;overflow-x:auto;}
+.erd svg{display:block;max-width:100%;height:auto;min-width:660px;}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--ink-faint);margin:0 0 18px;}
+.legend span{display:flex;align-items:center;gap:6px;}
+.swatch{width:13px;height:13px;border-radius:3px;display:inline-block;flex:none;}
+.step{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 14px;background:var(--surface-2);}
+.step__head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px;}
+.step__n{font-family:var(--mono);font-weight:700;font-size:13px;color:#fff;background:var(--navy-800);
+         border-radius:6px;padding:2px 9px;flex:none;}
+.step__t{font-weight:700;font-size:15px;}
+.step dl{display:grid;grid-template-columns:max-content 1fr;gap:5px 14px;margin:0;font-size:13.5px;}
+.step dt{font-weight:700;color:var(--ink-faint);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding-top:3px;}
+.step dd{margin:0;}
+.verdict{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin:0 0 18px;}
+.verdict div{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--surface-2);}
+.verdict dt{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:700;}
+.verdict dd{margin:6px 0 0;font-size:15px;font-weight:700;}
+.bar{height:9px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:9px;}
+.bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-500),var(--gold-400));}
+footer{max-width:1120px;margin:0 auto;padding-block:26px 44px;padding-left:20px;padding-right:20px;
+       color:var(--ink-faint);font-size:12.5px;border-top:1px solid var(--line);}
+
+@media print{
+  body{background:#fff;} .toc{display:none;}
+  section{box-shadow:none;page-break-inside:avoid;border-color:#ccc;}
+  .masthead{background:#0b1623 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead__inner">
+    <p class="eyebrow">Royal Metal Allocation System &middot; Status audit &middot; Revised</p>
+    <h1>Project Status Report</h1>
+    <p class="masthead__sub">
+      A complete inspection of the codebase — the implemented code treated as the source of
+      truth, and every documentation claim checked against it.
+    </p>
+    <p class="revised">
+      <strong>Revised 22 September 2026</strong>, after the audit's first four recommended
+      actions were carried out. Migration <code>0005</code> is applied, both Critical items
+      are closed, and both live contradictions are resolved. What changed is marked
+      <span class="s s-new">Resolved</span> throughout.
+    </p>
+    <div class="factbar">
+      <span class="fact">Branch <b>fix/deactivated-sessions-and-idempotency-replay</b> @ <b>7688011</b></span>
+      <span class="fact">Working tree <b>clean</b></span>
+      <span class="fact">Tests <b>332 passed</b></span>
+      <span class="fact">Backend <b>13,847 LOC</b></span>
+      <span class="fact">Frontend <b>5,801 LOC</b></span>
+      <span class="fact">Migrations <b>0005 applied (head)</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+
+<nav class="toc" aria-label="Contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#s1">Executive Summary</a></li>
+    <li><a href="#s2">Project Structure</a></li>
+    <li><a href="#s3">Frontend Status</a></li>
+    <li><a href="#s4">Backend Status</a></li>
+    <li><a href="#s5">Database Status</a></li>
+    <li><a href="#s6">Feature Status</a></li>
+    <li><a href="#s7">Business Rules</a></li>
+    <li><a href="#s8">Legacy Migration Status</a></li>
+    <li><a href="#s9">Testing &amp; Quality</a></li>
+    <li><a href="#s10">Environment &amp; Dependencies</a></li>
+    <li><a href="#s11">Git Status</a></li>
+    <li><a href="#s12">Missing Work &amp; Risks</a></li>
+    <li><a href="#s13">Recommended Next Steps</a></li>
+    <li><a href="#s14">Final Status Summary</a></li>
+  </ol>
+</nav>
+
+<!-- ======================================================== 1 ============ -->
+<section id="s1">
+  <h2><span class="num">01</span> Executive Summary</h2>
+  <p class="lede">What the system does today, how far along it is, and whether it runs.</p>
+
+  <div class="kpis">
+    <div class="kpi kpi--good"><div class="kpi__label">Completion</div><div class="kpi__value">~90%</div><div class="bar"><i style="width:90%"></i></div></div>
+    <div class="kpi kpi--good"><div class="kpi__label">Tests passing</div><div class="kpi__value">332</div><div class="kpi__sub">was 308 &middot; +24</div></div>
+    <div class="kpi kpi--good"><div class="kpi__label">Critical blockers</div><div class="kpi__value">0</div><div class="kpi__sub">both closed</div></div>
+    <div class="kpi kpi--warn"><div class="kpi__label">Unpushed commits</div><div class="kpi__value">6</div><div class="kpi__sub">ahead of origin/main</div></div>
+    <div class="kpi"><div class="kpi__label">Saved ledger dates</div><div class="kpi__value">19</div><div class="kpi__sub">399 allocation rows</div></div>
+  </div>
+
+  <h3>What the application currently does</h3>
+  <p>
+    RMAS is a working two-stage daily metal-allocation ledger. An <strong>operator</strong> opens the
+    Daily Allocation screen, enters Today's Required per allocation sector and Today's Acquired per
+    flow party, and submits once — <code>POST /staging/{date}</code>
+    (<code>rmas/services/staging_service.py:188</code>). An <strong>administrator</strong> opens the same
+    date, sees those figures already overlaid (<code>staging_service.py:122</code>), sets Alloted per
+    sector, and commits — <code>POST /allocations/{date}</code>
+    (<code>rmas/services/allocation_service.py:281</code>).
+  </p>
+  <p>
+    The server derives <code>previous_requirement</code> from the carry-forward source date and computes
+    <code>balance = previous_requirement + today_required &minus; alloted</code> itself; neither figure is
+    accepted from the client (<code>validation_service.py:252-258</code>). A saved date is immutable except
+    through a reasoned revision, which now also <strong>cascades forward</strong> through every later saved
+    date and audits each recomputation (<code>allocation_service.py:735</code>,
+    <code>cascade_service.py:98</code>). Four read-only screens exist — Allocation History, Metal Flow
+    History, Analysis Dashboard, and an administrator-only Audit Log with server-built before/after diffs.
+  </p>
+
+  <h3>Current development phase</h3>
+  <p>
+    <strong>Late implementation, pre-verification.</strong> The port is functionally near-complete. What
+    remains is operational hardening (one un-applied migration, one authentication hole), browser
+    verification — <em>nothing in this project has ever been looked at in a browser</em>, as every session
+    log states — and closing several documented contradictions.
+  </p>
+
+  <h3>Main technology stack</h3>
+  <p>
+    Python 3.14.0 &middot; FastAPI 0.141.1 &middot; Pydantic 2.13.5 &middot; SQLAlchemy 2.0.54 &middot;
+    Alembic 1.20.0 &middot; SQLite (<code>rmas/rmas.db</code>) &middot; bcrypt &middot; Starlette
+    <code>SessionMiddleware</code> cookie sessions &middot; pytest 9.1.1 + httpx. The frontend is
+    <strong>dependency-free vanilla ES modules</strong> — no framework, no bundler, no
+    <code>package.json</code> — served as static files by FastAPI itself (<code>rmas/main.py:66</code>).
+  </p>
+
+  <h3>Overall project status</h3>
+  <p>
+    13,847 lines of Python across eight layers, 5,801 lines of frontend, 332 passing tests, 26 session
+    logs, five migrations (all applied). Architecture discipline (<code>routers &rarr; services &rarr; repository &rarr;
+    models</code>) holds throughout: no router imports a SQLAlchemy model, and no service opens a
+    <code>Session</code>.
+  </p>
+
+  <h3>Is it runnable?</h3>
+  <div class="note note--ok">
+    <p class="note__title"><span class="s s-new">Resolved</span> Yes — the database now matches the code.</p>
+    <p>
+      The original audit found <code>rmas/rmas.db</code> stamped at Alembic revision <code>0004</code>
+      while the head was <code>0005</code>. Migration <code>0005</code> adds
+      <code>metal_allocation_audit_log.parent_audit_id</code>, which <code>models/audit.py:98</code>
+      maps unconditionally, so <em>every</em> audit write failed — and since save, revise and operator
+      submission each write an audit row inside their transaction, all three write paths were broken.
+    </p>
+    <p>
+      <strong>Migration <code>0005</code> has since been applied.</strong> It was rehearsed on a copy
+      first, because it rebuilds the audit table rather than altering it (SQLite has no
+      <code>ALTER CONSTRAINT</code>, so widening the <code>action_type</code> CHECK means a full table
+      swap on 39 compliance rows). Verified afterwards on the live file: revision <code>0005 (head)</code>,
+      <code>parent_audit_id</code> present, <code>RECALCULATE</code> admitted, both append-only triggers
+      recreated and still aborting <code>UPDATE</code> and <code>DELETE</code>, six indexes including the
+      new <code>idx_audit_parent</code>, no leftover rebuild table, and row counts across all eleven
+      tables identical to the pre-migration backup — with the audit log's 39 rows byte-identical.
+    </p>
+    <p>
+      One caveat carried forward honestly: a real save and a real revise have <strong>not</strong> been
+      driven through the API against live data, because that writes actual ledger rows for a real date
+      and increments a real revision number. Schema-level acceptance of a <code>RECALCULATE</code> row
+      carrying a <code>parent_audit_id</code> was confirmed inside a transaction that was rolled back,
+      so nothing was left in the append-only log.
+    </p>
+  </div>
+</section>
+
+<!-- ======================================================== 2 ============ -->
+<section id="s2">
+  <h2><span class="num">02</span> Project Structure</h2>
+  <p class="lede">Virtual environments, caches, generated files and dependency folders excluded.</p>
+
+  <div class="tree">
+<b>Royal Metal Allocation System/</b>
+├── <b>CLAUDE.md</b>                  <i>572 lines — the governing spec: domain model, architecture, critical rules</i>
+├── DATABASE_OVERVIEW.md  <i>supplied schema reference — now lags the live schema in 6 places</i>
+├── schema.sql            <i>supplied DDL (2026-09-20), design reference only</i>
+├── FILE_SUMMARIES.md     <i>per-file map of the 20 legacy files (CLAUDE.md cites docs/ — it is at root)</i>
+├── SECTORS_EXPLAINED.md  <i>why two sector tables exist and how party links them</i>
+├── PROMPT_*.md (5)       <i>page specs: allocation history, dashboard, audit log, flow history, edit saved date</i>
+├── RMAS_PORT_LEDGER.html <i>design reference for the KPI / summary tile treatment</i>
+├── *.png (4)             <i>screenshots used as the visual contract for charts and the filter card</i>
+├── requirements.txt      <i>12 pinned packages</i>
+│
+├── <b>legacy files/</b>         <i>all 20 Apps Script .gs/.html files (~10,300 lines), read-only reference</i>
+├── <b>seed/</b>                 <i>sector names.csv (21 sectors) · flow_sectors.csv (8 parties) · README.md</i>
+├── <b>sessions/</b>             <i>26 dated session folders — this project has NO WORK_LOG.md by design</i>
+│
+├── <b>rmas/</b>                 <i>FastAPI backend — 13,847 LOC</i>
+│   ├── main.py · config.py · database.py
+│   ├── create_user.py · seed_reference_data.py · reconcile_carry_forward.py
+│   ├── routers/     <i>7 files — HTTP only; deps.py holds the auth dependencies</i>
+│   ├── services/    <i>13 files — all business logic; + idempotency_service.py (replay policy)</i>
+│   ├── repository/  <i>8 files — the only place SQLAlchemy is touched</i>
+│   ├── models/      <i>8 files — 11 tables</i>
+│   ├── schemas/     <i>6 files — Pydantic request/response</i>
+│   ├── rules/       <i>business_rules.py — single source of toggles</i>
+│   ├── migrations/  <i>versions 0001 → 0005, linear</i>
+│   └── tests/       <i>21 files, 332 tests</i>
+│
+└── <b>frontend/</b>             <i>5,801 LOC — no build step, no dependencies</i>
+    ├── index.html
+    └── src/
+        ├── api/         <i>5 modules — the only place fetch() is called</i>
+        ├── components/  <i>appHeader · nav · filterBar · charts (hand-written SVG)</i>
+        ├── lib/         <i>format · theme · auditVocabulary</i>
+        ├── styles/      <i>tokens · reports · audit · app · theme (2,064 lines)</i>
+        └── views/       <i>login · allocation · allocationHistory · flowHistory · analysis · audit · dashboard</i>
+  </div>
+
+  <div class="note">
+    <p class="note__title">On <code>WORK_LOG.md</code></p>
+    <p>
+      There is no <code>WORK_LOG.md</code> in this repository, and there should not be. CLAUDE.md's
+      "Session Logs" section replaced the rolling log with one folder per session under
+      <code>sessions/YYYY-MM-DD_slug/session.md</code>. All 26 were read for this audit.
+    </p>
+  </div>
+</section>
+
+<!-- ======================================================== 3 ============ -->
+<section id="s3">
+  <h2><span class="num">03</span> Frontend Status</h2>
+  <p class="lede">Pages, forms, dashboards, tables, modals, navigation, interactions and the API each one calls.</p>
+
+  <div class="note note--warn">
+    <p class="note__title">There is no URL routing</p>
+    <p>
+      <code>main.js</code> chooses login vs. app shell from session state, and
+      <code>views/dashboard.js:22</code> holds the active tab in a local variable and repaints. Every screen
+      lives at <code>/</code>. This is stated in <code>main.js:3</code> — it is the design, not an omission.
+    </p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>Page / Component</th><th>Route</th><th>Source file</th><th>Purpose</th><th>Backend called</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>App shell (header, tabs, view slot)</td><td><code>/</code></td><td><code>views/dashboard.js</code></td><td>Header, nav, sign-out, tab dispatch</td><td><code>POST /auth/logout</code>, <code>GET /reports/counts</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>Login page</td><td><code>/</code> (no session)</td><td><code>views/login.js</code></td><td>Email + password form, inline error</td><td><code>POST /auth/login</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>App header + theme toggle</td><td>—</td><td><code>components/appHeader.js</code></td><td>Brand, user pill, role pill, dark-mode toggle</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>Nav tabs + count pills</td><td>—</td><td><code>components/nav.js</code></td><td>5 tabs; Audit hidden for non-admins</td><td><code>GET /reports/counts</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td><strong>Daily Allocation</strong></td><td>tab <code>daily</code></td><td><code>views/allocation.js</code> (701)</td><td>Date picker, 6 KPI tiles, allocation table, Metal Flow table, live recalc, save / submit / revise</td><td><code>GET</code> + <code>POST /allocations/{d}</code>, <code>.../revise</code>, <code>.../revise/preview</code>, <code>POST /staging/{d}</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>&#8627; Revision modal</td><td>—</td><td><code>allocation.js:149</code></td><td>Reason &ge; 10 chars + live cascade preview line</td><td><code>POST /allocations/{d}/revise/preview</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>&#8627; Notice stack</td><td>—</td><td><code>allocation.js:222</code></td><td>Stacks revision / submission / carry-forward notices</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td><strong>Allocation History</strong></td><td>tab <code>allocationHistory</code></td><td><code>views/allocationHistory.js</code> (225)</td><td>Filterable table, summary strip, pager</td><td><code>GET /reports/allocation-history</code>, <code>GET /sectors</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td><strong>Metal Flow History</strong></td><td>tab <code>flowHistory</code></td><td><code>views/flowHistory.js</code> (295)</td><td>Chart-only: heatmap, share chart, cycle delta</td><td><code>GET /reports/flow-analysis</code>, <code>GET /sectors</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td><strong>Analysis Dashboard</strong></td><td>tab <code>dashboard</code></td><td><code>views/analysis.js</code> (378)</td><td>6 KPI tiles, 4 charts, top-pending list</td><td><code>GET /reports/dashboard</code>, <code>GET /sectors</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td><strong>Audit Log</strong> (admin)</td><td>tab <code>audit</code></td><td><code>views/audit.js</code> (636)</td><td>Filterable list, KPI cards, detail modal with diff tables, parent/child cascade links</td><td><code>GET /audit</code>, <code>/audit/filter-options</code>, <code>/audit/entry/{id}</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>&#8627; Access-gate card</td><td>—</td><td><code>audit.js:181</code></td><td>Convenience gate; the real gate is server-side</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>Shared filter bar</td><td>—</td><td><code>components/filterBar.js</code> (163)</td><td>Dates, quick range, sector select, optional status. <strong>No Apply button</strong> — fires on change</td><td>—</td><td><span class="s s-part">Partial</span> no party / priority filter</td></tr>
+        <tr><td>SVG chart engine</td><td>—</td><td><code>components/charts.js</code> (509)</td><td>Grouped bar, line, sector bar, flow share, heat ramp</td><td>—</td><td><span class="s s-part">Partial</span> 3 legacy features absent</td></tr>
+        <tr><td>Formatting helpers</td><td>—</td><td><code>lib/format.js</code></td><td>The single <code>toFixed</code> site; grams&harr;kg, balance class</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>Theme</td><td>—</td><td><code>lib/theme.js</code>, <code>styles/theme.css</code></td><td>Dark mode, token inversion, pre-paint FOUC guard (<code>index.html:26</code>)</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>Audit vocabulary</td><td>—</td><td><code>lib/auditVocabulary.js</code></td><td>Action code &rarr; human label</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>CSS contract</td><td>—</td><td><code>styles/*.css</code> (2,064)</td><td>First four files are byte-identical ports; <code>theme.css</code> is the only permitted override</td><td>—</td><td><span class="s s-ok">Complete</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Validation implemented in the frontend</h3>
+  <ul>
+    <li>Per-cell decimal parsing with <code>is-invalid</code> flagging — <code>allocation.js:501-507</code></li>
+    <li>Blur-normalisation to exactly three decimals, never mid-keystroke — <code>allocation.js:478</code></li>
+    <li>Live balance and total recalculation in <strong>integer grams</strong> — <code>recalc()</code>, <code>allocation.js:487</code></li>
+    <li>Revision reason &ge; 10 characters before the modal will close — <code>allocation.js:617</code></li>
+    <li>HTML5 <code>required</code> and <code>type="email"</code> on the login form</li>
+  </ul>
+  <p>All of it is convenience. Every one of these rules is re-checked server-side.</p>
+
+  <h3>Deliberately absent</h3>
+  <p>
+    Each of these carries a source comment explaining why: the Purity filter and Search box on Allocation
+    History; the Acquired Status filter and Search box on Metal Flow History; the pager on Metal Flow
+    History (chart-only by spec).
+  </p>
+</section>
+
+<!-- ======================================================== 4 ============ -->
+<section id="s4">
+  <h2><span class="num">04</span> Backend Status</h2>
+  <p class="lede">Every endpoint, its inputs and outputs, and which screen calls it.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>Method</th><th>Endpoint</th><th>Source file</th><th>Purpose</th><th>Input</th><th>Output</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>GET</td><td><code>/health</code></td><td><code>main.py:60</code></td><td>Liveness</td><td>—</td><td><code>{status, version}</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>POST</td><td><code>/auth/login</code></td><td><code>routers/auth.py:36</code></td><td>Password login, closed roster</td><td><code>{email, password}</code></td><td><code>CurrentUserResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>POST</td><td><code>/auth/logout</code></td><td><code>auth.py:52</code></td><td>Clear session</td><td>—</td><td><code>{ok}</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/auth/me</code></td><td><code>auth.py:58</code></td><td>Current identity + role</td><td>cookie</td><td><code>CurrentUserResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/auth/access-diagnostics</code></td><td><code>auth.py:63</code></td><td>"Why is my access what it is"</td><td>cookie</td><td><code>AccessDiagnosticsResponse</code></td><td><span class="s s-part">No caller</span></td></tr>
+        <tr><td>GET</td><td><code>/sectors</code></td><td><code>routers/sectors.py:28</code></td><td>Scope-filtered reference data</td><td>cookie</td><td><code>SectorsResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/allocations/{date}</code></td><td><code>routers/allocations.py:180</code></td><td>Daily Allocation screen model</td><td>path date</td><td><code>AllocationModelResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>POST</td><td><code>/allocations/{date}</code></td><td><code>allocations.py:242</code></td><td>Commit a date (admin only)</td><td><code>SaveAllocationRequest</code></td><td><code>SaveAllocationResponse</code></td><td><span class="s s-new">Resolved</span> Complete</td></tr>
+        <tr><td>POST</td><td><code>/allocations/{date}/revise/preview</code></td><td><code>allocations.py:301</code></td><td>Cascade preview, writes nothing</td><td><code>ReviseAllocationRequest</code></td><td><code>CascadePreviewResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>POST</td><td><code>/allocations/{date}/revise</code></td><td><code>allocations.py:334</code></td><td>Revise + forward cascade (admin)</td><td><code>ReviseAllocationRequest</code></td><td><code>ReviseAllocationResponse</code></td><td><span class="s s-new">Resolved</span> Complete</td></tr>
+        <tr><td>POST</td><td><code>/staging/{date}</code></td><td><code>routers/staging.py:60</code></td><td>Operator submission, one shot</td><td><code>SubmitRequirementRequest</code></td><td><code>SubmitRequirementResponse</code></td><td><span class="s s-new">Resolved</span> Complete</td></tr>
+        <tr><td>GET</td><td><code>/reports/allocation-history</code></td><td><code>routers/reports.py:76</code></td><td>Demand history, summary, pager</td><td>7 query params</td><td><code>AllocationHistoryResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/reports/flow-history</code></td><td><code>reports.py:195</code></td><td>Supply rows</td><td>5 query params</td><td><code>FlowHistoryResponse</code></td><td><span class="s s-part">No caller</span></td></tr>
+        <tr><td>GET</td><td><code>/reports/dashboard</code></td><td><code>reports.py:223</code></td><td>Both ledgers joined; KPIs + series</td><td>3 query params</td><td><code>DashboardResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/reports/flow-analysis</code></td><td><code>reports.py:350</code></td><td>Heatmap, share, cycle delta</td><td>3 query params</td><td><code>FlowAnalysisResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/reports/counts</code></td><td><code>reports.py:499</code></td><td>Nav pill counts</td><td>cookie</td><td><code>NavCounts</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/audit/filter-options</code></td><td><code>routers/audit.py:77</code></td><td>Selects + suggested date window</td><td>admin cookie</td><td><code>AuditFilterOptions</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/audit</code></td><td><code>audit.py:108</code></td><td>Filtered log — truncated, not paged</td><td>7 query params</td><td><code>AuditLogResponse</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>GET</td><td><code>/audit/entry/{audit_id}</code></td><td><code>audit.py:219</code></td><td>One entry + server-built diff + children</td><td>path id</td><td><code>AuditEntryDetail</code></td><td><span class="s s-ok">Complete</span></td></tr>
+        <tr><td>—</td><td><code>/</code> (static mount)</td><td><code>main.py:67</code></td><td>Serves the frontend, caching disabled</td><td>—</td><td>files</td><td><span class="s s-ok">Complete</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Services</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Service</th><th>File (lines)</th><th>Owns</th></tr></thead>
+      <tbody>
+        <tr><td>Allocation</td><td><code>allocation_service.py</code> (986)</td><td>Screen model, carry-forward, save, revise, cascade orchestration</td></tr>
+        <tr><td>Cascade</td><td><code>cascade_service.py</code> (228)</td><td><strong>Pure</strong> forward-cascade arithmetic — no Session, no ORM, no float</td></tr>
+        <tr><td>Staging</td><td><code>staging_service.py</code> (406)</td><td>Operator submission, staging overlay, one-shot rule</td></tr>
+        <tr><td>Validation</td><td><code>validation_service.py</code> (364)</td><td>Weight assertions, totals, save rules, payload rebuild, revision reason</td></tr>
+        <tr><td>Weight</td><td><code>weight_service.py</code> (65)</td><td>The <strong>only</strong> kg&harr;g conversion; refuses <code>float</code> outright</td></tr>
+        <tr><td>Date</td><td><code>date_service.py</code> (120)</td><td>Monday&rarr;Saturday rule, source-date resolution (shared with the cascade)</td></tr>
+        <tr><td>Scope</td><td><code>scope_service.py</code> (198)</td><td>Admin resolution, deny-list precedence, party/flow scope, diagnostics</td></tr>
+        <tr><td>Audit (write)</td><td><code>audit_service.py</code> (183)</td><td>Entry construction, ID generation, snapshots</td></tr>
+        <tr><td>Audit (read)</td><td><code>audit_report_service.py</code> (337)</td><td>Snapshot decode, diff, totals, date revision summary</td></tr>
+        <tr><td>Report</td><td><code>report_service.py</code> (270)</td><td>Dashboard aggregation, cycle delta, cross-ledger sector matching</td></tr>
+        <tr><td>Idempotency <span class="s s-new">New</span></td><td><code>idempotency_service.py</code> (79)</td><td>Which repeated <code>request_id</code>s may be answered with a stored result — never across accounts, endpoints, or unreadable records</td></tr>
+        <tr><td>Password</td><td><code>password_service.py</code> (18)</td><td>bcrypt hash / verify only</td></tr>
+        <tr><td>Exceptions</td><td><code>exceptions.py</code> (56)</td><td>9 domain errors carrying legacy error codes verbatim</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Error handling</h3>
+  <p>
+    Services raise domain exceptions and never import <code>HTTPException</code>; routers own the mapping
+    (<code>allocations.py:73-82</code>, <code>staging.py:36-41</code>). Verified by search: zero
+    <code>HTTPException</code> imports anywhere under <code>services/</code>.
+  </p>
+
+  <h3>Authentication and authorization</h3>
+  <ul>
+    <li>Cookie session carries only a signed <code>user_id</code> — <code>main.py:52</code>, <code>deps.py:26</code>.</li>
+    <li>Role and scope are rebuilt from the database <strong>on every request</strong> — <code>deps.py:43-56</code>. Rule 8 holds.</li>
+    <li>The deny list always overrides an admin grant — <code>scope_service.py:44</code>.</li>
+    <li><span class="s s-new">Resolved</span> <code>is_active</code> is re-checked on every request, not only at login — <code>deps.py:34</code>. A deactivated account loses its session immediately rather than keeping access until the cookie expires.</li>
+    <li>Scope is applied in the SQL <code>WHERE</code> clause, never post-filtered — <code>sector_repo.py:21</code>, <code>report_repo.py:23</code>, <code>staging_repo.py:25</code>. An operator with zero granted parties fails <strong>closed</strong>.</li>
+    <li>Every <code>/audit/*</code> route re-checks admin status server-side via <code>require_admin</code>.</li>
+    <li><code>/allocations/{date}/revise</code> deliberately avoids <code>Depends(require_admin)</code> so the service can write an <code>UNAUTHORIZED_REVISION</code> audit entry first — <code>allocations.py:347-350</code>.</li>
+  </ul>
+</section>
+
+<!-- ======================================================== 5 ============ -->
+<section id="s5">
+  <h2><span class="num">05</span> Database Status</h2>
+  <p class="lede">Technology, configuration, every table and column, verified relationships, and an ER diagram built only from foreign keys that actually exist.</p>
+
+  <div class="two-col">
+    <div>
+      <h3>Configuration</h3>
+      <ul>
+        <li><strong>Technology:</strong> SQLite (stdlib driver). PostgreSQL was the original target; the move is documented as a <code>DATABASE_URL</code> change.</li>
+        <li><strong>Location:</strong> <code>rmas/rmas.db</code>, resolved relative to <code>config.py:20</code> — gitignored.</li>
+        <li><strong>ORM:</strong> SQLAlchemy 2.x <code>DeclarativeBase</code>, modern <code>select()</code> style throughout.</li>
+        <li><strong>Migrations:</strong> Alembic — five revisions, linear <code>0001 &rarr; 0005</code>.</li>
+        <li><strong>Applied?</strong> <span class="s s-new">Resolved</span> Yes — database at <code>0005 (head)</code>, applied 2026-09-22 after a rehearsal on a copy. Backup kept at <code>rmas/rmas-backup-pre0005.db</code> (gitignored).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Live data</h3>
+      <ul>
+        <li>2 users — 1 administrator, 1 operator</li>
+        <li>9 parties &middot; 21 allocation sectors &middot; 8 flow sectors</li>
+        <li>399 <code>metal_master</code> rows over 19 saved dates (2026-09-01 &rarr; 2026-09-22)</li>
+        <li>152 <code>metal_flow_master</code> rows &middot; 22 staging rows</li>
+        <li>39 audit entries — 36 <code>SAVE</code>, 2 <code>SUBMIT_REQUIREMENT</code>, 1 <code>BLOCKED_RESUBMISSION</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <details>
+    <summary>Full column listing — 11 tables</summary>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Table</th><th>Column</th><th>Type</th><th>PK</th><th>FK</th><th>Nullable</th><th>Default / constraint</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="8"><strong>app_user</strong></td><td>user_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td>autoincrement</td></tr>
+          <tr><td>email</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>display_name</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td></td></tr>
+          <tr><td>is_admin</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code>, CHECK 0/1</td></tr>
+          <tr><td>admin_denied</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code>, CHECK 0/1</td></tr>
+          <tr><td>is_active</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>1</code>, CHECK 0/1</td></tr>
+          <tr><td>password_hash</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><em>departure from schema.sql</em></td></tr>
+          <tr><td>created_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+
+          <tr><td rowspan="5"><strong>party</strong></td><td>party_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>party_name</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>party_key</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>is_active</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>1</code></td></tr>
+          <tr><td>created_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+
+          <tr><td rowspan="9"><strong>sector</strong></td><td>sector_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>sector_name</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>sector_key</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>priority</td><td><strong>TEXT</strong></td><td></td><td>—</td><td>No</td><td><em>departure — schema.sql says INTEGER; migration 0003</em></td></tr>
+          <tr><td>purity</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>verbatim, never parsed</td></tr>
+          <tr><td>party_id</td><td>INTEGER</td><td></td><td>&rarr; party</td><td>No</td><td></td></tr>
+          <tr><td>display_order</td><td>INTEGER</td><td></td><td>—</td><td>Yes</td><td></td></tr>
+          <tr><td>is_active</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>1</code></td></tr>
+          <tr><td>created_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+
+          <tr><td rowspan="7"><strong>flow_sector</strong></td><td>flow_sector_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>sector_name</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>sector_key</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>party_id</td><td>INTEGER</td><td></td><td>&rarr; party</td><td>No</td><td></td></tr>
+          <tr><td>display_order</td><td>INTEGER</td><td></td><td>—</td><td>Yes</td><td></td></tr>
+          <tr><td>is_active</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>1</code></td></tr>
+          <tr><td>created_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+
+          <tr><td rowspan="13"><strong>metal_master</strong></td><td>allocation_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>allocation_date</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>indexed; CHECK <code>IS strftime('%Y-%m-%d',&hellip;)</code></td></tr>
+          <tr><td>sector_id</td><td>INTEGER</td><td></td><td>&rarr; sector</td><td>No</td><td>UNIQUE(date, sector_id)</td></tr>
+          <tr><td>party_id</td><td>INTEGER</td><td></td><td>&rarr; party</td><td>No</td><td></td></tr>
+          <tr><td>priority_snapshot</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>denormalised on purpose</td></tr>
+          <tr><td>purity_snapshot</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>denormalised on purpose</td></tr>
+          <tr><td>previous_requirement_g</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code> — <strong>grams</strong></td></tr>
+          <tr><td>today_required_g</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>alloted_g</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>balance_g</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>revision_number</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>saved_by</td><td>TEXT</td><td></td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>saved_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+
+          <tr><td rowspan="8"><strong>metal_flow_master</strong></td><td>flow_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>allocation_date</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>indexed; date-format CHECK</td></tr>
+          <tr><td>flow_sector_id</td><td>INTEGER</td><td></td><td>&rarr; flow_sector</td><td>No</td><td>UNIQUE(date, flow_sector_id)</td></tr>
+          <tr><td>party_id</td><td>INTEGER</td><td></td><td>&rarr; party</td><td>No</td><td></td></tr>
+          <tr><td>acquired_g</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code>, CHECK <code>&gt;= 0</code></td></tr>
+          <tr><td>revision_number</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>saved_by</td><td>TEXT</td><td></td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>saved_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+
+          <tr><td rowspan="11"><strong>metal_requirement_staging</strong></td><td>staging_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>submission_id</td><td>TEXT</td><td></td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>allocation_date</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>indexed; date-format CHECK</td></tr>
+          <tr><td>party_id</td><td>INTEGER</td><td></td><td>&rarr; party</td><td>No</td><td></td></tr>
+          <tr><td>operator_email</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>indexed</td></tr>
+          <tr><td>submitted_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code></td></tr>
+          <tr><td>record_type</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>CHECK <code>IN ('ALLOCATION','FLOW')</code></td></tr>
+          <tr><td>sector_id</td><td>INTEGER</td><td></td><td>&rarr; sector</td><td>Yes</td><td>CHECK: exactly one of the two is set</td></tr>
+          <tr><td>flow_sector_id</td><td>INTEGER</td><td></td><td>&rarr; flow_sector</td><td>Yes</td><td>&#8221;</td></tr>
+          <tr><td>value_g</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>status</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>'SUBMITTED'</code>, CHECK <code>IN ('SUBMITTED','CONSUMED')</code> — <em>departure; schema.sql says <code>'PENDING'</code></em></td></tr>
+
+          <tr><td rowspan="14"><strong>metal_allocation_<wbr>audit_log</strong></td><td>audit_row_id</td><td>INTEGER</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>audit_id</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>UNIQUE</td></tr>
+          <tr><td>allocation_date</td><td>TEXT</td><td></td><td>—</td><td><strong>Yes</strong></td><td><em>departure, migration 0004</em>; CHECK permits NULL</td></tr>
+          <tr><td>action_type</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>CHECK — <span class="s s-new">Resolved</span> all 10 values, <code>RECALCULATE</code> included</td></tr>
+          <tr><td>action_status</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>CHECK <code>IN ('SUCCESS','BLOCKED','FAILED')</code></td></tr>
+          <tr><td>revision_number</td><td>INTEGER</td><td></td><td>—</td><td>No</td><td><code>0</code></td></tr>
+          <tr><td>user_email</td><td>TEXT</td><td></td><td>—</td><td>No</td><td>indexed</td></tr>
+          <tr><td>action_timestamp</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code> <strong>(UTC)</strong>, indexed — displayed in Asia/Kolkata <span class="s s-new">Resolved</span></td></tr>
+          <tr><td>revision_reason</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td></td></tr>
+          <tr><td>previous_allocation_data</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td>JSON snapshot</td></tr>
+          <tr><td>updated_allocation_data</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td>JSON snapshot</td></tr>
+          <tr><td>previous_metal_flow_data<br>updated_metal_flow_data</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td>JSON snapshots</td></tr>
+          <tr><td>request_id</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td>indexed</td></tr>
+          <tr><td><code>parent_audit_id</code></td><td>TEXT</td><td></td><td><em>none, deliberate</em></td><td>Yes</td><td><span class="s s-new">Resolved</span> present; migration 0005 applied</td></tr>
+
+          <tr><td rowspan="5"><strong>request_log</strong></td><td>request_id</td><td>TEXT</td><td>&#10003;</td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>user_email</td><td>TEXT</td><td></td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>endpoint</td><td>TEXT</td><td></td><td>—</td><td>No</td><td></td></tr>
+          <tr><td>response_json</td><td>TEXT</td><td></td><td>—</td><td>Yes</td><td><span class="s s-new">Resolved</span> stored <em>and</em> replayed on a repeated request</td></tr>
+          <tr><td>created_at</td><td>TEXT</td><td></td><td>—</td><td>No</td><td><code>datetime('now')</code>, indexed</td></tr>
+
+          <tr><td><strong>user_party_scope</strong></td><td>user_id, party_id</td><td>INTEGER</td><td>&#10003;&#10003;</td><td>&rarr; app_user, &rarr; party</td><td>No</td><td>ON DELETE CASCADE</td></tr>
+          <tr><td><strong>user_flow_scope</strong></td><td>user_id, flow_sector_id</td><td>INTEGER</td><td>&#10003;&#10003;</td><td>&rarr; app_user, &rarr; flow_sector</td><td>No</td><td>ON DELETE CASCADE</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <h3>Relationships — verified from <code>PRAGMA foreign_key_list</code></h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Parent table</th><th>Child table</th><th>Relationship</th><th>Foreign key</th><th>Delete behaviour</th></tr></thead>
+      <tbody>
+        <tr><td>party</td><td>sector</td><td>1 &rarr; many</td><td><code>sector.party_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>party</td><td>flow_sector</td><td>1 &rarr; many</td><td><code>flow_sector.party_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>party</td><td>metal_master</td><td>1 &rarr; many</td><td><code>metal_master.party_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>party</td><td>metal_flow_master</td><td>1 &rarr; many</td><td><code>metal_flow_master.party_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>party</td><td>metal_requirement_staging</td><td>1 &rarr; many</td><td><code>.party_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>party</td><td>user_party_scope</td><td>1 &rarr; many</td><td><code>.party_id</code></td><td><strong>CASCADE</strong></td></tr>
+        <tr><td>sector</td><td>metal_master</td><td>1 &rarr; many</td><td><code>.sector_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>sector</td><td>metal_requirement_staging</td><td>1 &rarr; many (nullable)</td><td><code>.sector_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>flow_sector</td><td>metal_flow_master</td><td>1 &rarr; many</td><td><code>.flow_sector_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>flow_sector</td><td>metal_requirement_staging</td><td>1 &rarr; many (nullable)</td><td><code>.flow_sector_id</code></td><td>NO ACTION</td></tr>
+        <tr><td>flow_sector</td><td>user_flow_scope</td><td>1 &rarr; many</td><td><code>.flow_sector_id</code></td><td><strong>CASCADE</strong></td></tr>
+        <tr><td>app_user</td><td>user_party_scope</td><td>1 &rarr; many</td><td><code>.user_id</code></td><td><strong>CASCADE</strong></td></tr>
+        <tr><td>app_user</td><td>user_flow_scope</td><td>1 &rarr; many</td><td><code>.user_id</code></td><td><strong>CASCADE</strong></td></tr>
+      </tbody>
+      <caption>
+        <code>metal_allocation_audit_log</code> and <code>request_log</code> declare <strong>no foreign keys
+        at all</strong> — deliberate, per <code>models/audit.py:91-97</code>. <code>parent_audit_id</code> is a
+        self-reference by value only. No relationship beyond this table has been inferred or invented.
+      </caption>
+    </table>
+  </div>
+
+  <div class="note note--warn">
+    <p class="note__title"><span class="s s-high">High</span> Foreign keys are declared but not enforced</p>
+    <p>
+      <code>PRAGMA foreign_keys</code> reports <code>0</code> on the live connection, and
+      <code>database.py</code> registers no connect event to enable it. Every foreign key above is
+      decorative at runtime. That is consistent with the audit model's own reasoning for avoiding a
+      self-FK, but it means no foreign key in this database currently constrains a write.
+    </p>
+  </div>
+
+  <h3>Entity relationships</h3>
+  <div class="erd">
+    <svg viewBox="0 0 920 560" role="img" aria-label="Entity relationship diagram: party is the hub linking sector, flow_sector and the three ledger tables; app_user links through two scope join tables; the audit log and request log stand alone with no foreign keys.">
+      <defs>
+        <style>
+          .box{fill:#ffffff;stroke:#cbd5e1;stroke-width:1.5;}
+          .box-hub{fill:#fdf6e7;stroke:#c89d47;stroke-width:2;}
+          .box-ledger{fill:#eff6ff;stroke:#2563eb;stroke-width:1.5;}
+          .box-detached{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.5;stroke-dasharray:5 4;}
+          .t{font:600 12.5px ui-sans-serif,system-ui,sans-serif;fill:#0f172a;}
+          .tk{font:400 10.5px ui-monospace,monospace;fill:#64748b;}
+          .ln{stroke:#94a3b8;stroke-width:1.4;fill:none;}
+          .ln-c{stroke:#059669;stroke-width:1.6;fill:none;stroke-dasharray:6 3;}
+          .lbl{font:600 9.5px ui-monospace,monospace;fill:#64748b;}
+        </style>
+      </defs>
+
+      <!-- app_user + scope join tables -->
+      <rect class="box" x="16" y="212" width="150" height="46" rx="8"/>
+      <text class="t" x="30" y="234">app_user</text><text class="tk" x="30" y="249">user_id PK</text>
+
+      <rect class="box" x="16" y="96" width="150" height="46" rx="8"/>
+      <text class="t" x="30" y="118">user_party_scope</text><text class="tk" x="30" y="133">user_id + party_id</text>
+
+      <rect class="box" x="16" y="328" width="150" height="46" rx="8"/>
+      <text class="t" x="30" y="350">user_flow_scope</text><text class="tk" x="30" y="365">user_id + flow_sector_id</text>
+
+      <path class="ln-c" d="M91 212 L91 142"/>
+      <path class="ln-c" d="M91 258 L91 328"/>
+      <text class="lbl" x="97" y="180">CASCADE</text>
+      <text class="lbl" x="97" y="298">CASCADE</text>
+
+      <!-- party hub -->
+      <rect class="box-hub" x="352" y="208" width="168" height="54" rx="9"/>
+      <text class="t" x="368" y="232">party</text>
+      <text class="tk" x="368" y="248">party_id PK &middot; 9 rows</text>
+
+      <path class="ln-c" d="M166 119 C 270 119, 300 200, 352 226"/>
+      <path class="ln-c" d="M166 351 C 270 351, 300 270, 352 246"/>
+
+      <!-- sector + flow_sector -->
+      <rect class="box" x="700" y="96" width="196" height="54" rx="8"/>
+      <text class="t" x="716" y="120">sector</text>
+      <text class="tk" x="716" y="136">21 allocation sectors (demand)</text>
+
+      <rect class="box" x="700" y="328" width="196" height="54" rx="8"/>
+      <text class="t" x="716" y="352">flow_sector</text>
+      <text class="tk" x="716" y="368">8 parties (supply)</text>
+
+      <path class="ln" d="M520 224 C 600 210, 630 150, 700 126"/>
+      <path class="ln" d="M520 248 C 600 262, 630 330, 700 352"/>
+      <text class="lbl" x="576" y="176">owns</text>
+      <text class="lbl" x="576" y="316">owns</text>
+
+      <!-- ledgers -->
+      <rect class="box-ledger" x="286" y="404" width="180" height="52" rx="8"/>
+      <text class="t" x="300" y="427">metal_master</text>
+      <text class="tk" x="300" y="443">399 rows &middot; 19 dates</text>
+
+      <rect class="box-ledger" x="486" y="404" width="180" height="52" rx="8"/>
+      <text class="t" x="500" y="427">metal_flow_master</text>
+      <text class="tk" x="500" y="443">152 rows</text>
+
+      <rect class="box-ledger" x="386" y="486" width="200" height="52" rx="8"/>
+      <text class="t" x="400" y="509">metal_requirement_staging</text>
+      <text class="tk" x="400" y="525">22 rows &middot; ALLOCATION | FLOW</text>
+
+      <path class="ln" d="M406 262 L 386 404"/>
+      <path class="ln" d="M466 262 L 546 404"/>
+      <path class="ln" d="M436 262 L 466 486"/>
+
+      <path class="ln" d="M796 150 C 796 300, 560 360, 466 412"/>
+      <path class="ln" d="M796 382 C 760 440, 680 470, 586 500"/>
+      <path class="ln" d="M700 123 C 640 200, 600 440, 586 496"/>
+
+      <!-- detached -->
+      <rect class="box-detached" x="16" y="440" width="230" height="64" rx="8"/>
+      <text class="t" x="32" y="464">metal_allocation_audit_log</text>
+      <text class="tk" x="32" y="480">no FKs &middot; append-only (triggers)</text>
+      <text class="tk" x="32" y="495">parent_audit_id: value only</text>
+
+      <rect class="box-detached" x="16" y="516" width="230" height="34" rx="8"/>
+      <text class="t" x="32" y="538">request_log &nbsp;<tspan class="tk">no FKs</tspan></text>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><i class="swatch" style="background:#fdf6e7;border:2px solid #c89d47"></i> Hub — party links demand to supply</span>
+    <span><i class="swatch" style="background:#eff6ff;border:1.5px solid #2563eb"></i> Ledger / transactional</span>
+    <span><i class="swatch" style="background:#f8fafc;border:1.5px dashed #cbd5e1"></i> No foreign keys (deliberate)</span>
+    <span><i class="swatch" style="background:#059669"></i> ON DELETE CASCADE</span>
+  </div>
+
+  <h3>Also present</h3>
+  <p>
+    Three views — <code>v_allocation_kg</code> and <code>v_flow_kg</code> (presentation-only kilogram
+    projections; never computed on) plus <code>v_closing_balance_by_date</code> — and two triggers,
+    <code>trg_audit_no_update</code> and <code>trg_audit_no_delete</code>, enforcing append-only in the
+    database rather than by convention. Proven by <code>tests/test_audit_append_only.py</code>.
+  </p>
+</section>
+
+<!-- ======================================================== 6 ============ -->
+<section id="s6">
+  <h2><span class="num">06</span> Feature Status</h2>
+  <p class="lede">Every feature found in the codebase or the specifications, including the Allocation History module.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Feature</th><th>Frontend</th><th>Backend</th><th>Database</th><th>Tests</th><th>Overall</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr><td>Username/password login, closed roster</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>views/login.js</code>, <code>routers/auth.py:36</code>, <code>test_auth_flow.py</code> (13)</td></tr>
+        <tr><td>Session + server-side role/scope resolution</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>deps.py:43</code>, <code>scope_service.py:49</code>, <code>test_scope_service.py</code> (18)</td></tr>
+        <tr><td>Operator party scoping</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>sector_repo.py:21</code>, <code>test_sector_scoping.py</code> (7)</td></tr>
+        <tr><td>Deactivation ends a live session <span class="s s-new">New</span></td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>deps.py:34</code>, <code>test_auth_flow.py</code> (12 new, each verified to fail without the guard)</td></tr>
+        <tr><td>Timestamps displayed in app timezone <span class="s s-new">New</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>audit_report_service.py:249</code>, <code>test_audit_diff.py</code> (7 new); storage stays UTC</td></tr>
+        <tr><td>Account provisioning (<code>create_user.py</code>)</td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-none">Not Started</span></td><td><span class="s s-part">Partial</span></td><td><code>create_user.py</code>; no test file</td></tr>
+        <tr><td>Reference data seeding</td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>seed_reference_data.py</code>, <code>test_seed_reference_data.py</code> (4)</td></tr>
+        <tr><td>Integer-grams precision</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>weight_service.py</code>, <code>test_weight_service.py</code> (7)</td></tr>
+        <tr><td>Balance arithmetic</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>validation_service.py:125</code>, <code>test_balance_arithmetic.py</code> (21)</td></tr>
+        <tr><td>Carry-forward (Mon&rarr;Sat, gap fallback)</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>date_service.py:80</code>, <code>test_allocation_model.py</code> (10)</td></tr>
+        <tr><td>Daily Allocation read path</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>allocation.js</code>, <code>allocation_service.py:157</code></td></tr>
+        <tr><td>Admin save (commit a date)</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>allocation_service.py:281</code>, <code>test_allocation_save.py</code> (16) — migration applied</td></tr>
+        <tr><td>Operator submission (staging)</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>staging_service.py:188</code>, <code>test_staging_submission.py</code> (23)</td></tr>
+        <tr><td>Staging overlay on admin screen</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>staging_service.py:122</code></td></tr>
+        <tr><td>Submission announcement banner</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>allocation.js:274</code>, <code>staging_repo.py:108</code></td></tr>
+        <tr><td>Idempotency (<code>request_id</code>)</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td>Replays the stored result (rule 12); <code>idempotency_service.py</code> holds the guards</td></tr>
+        <tr><td><strong>Edit Saved Date (revise)</strong></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>allocation_service.py:735</code>; <code>parent_audit_id</code> now present. Not yet exercised end-to-end in a browser</td></tr>
+        <tr><td><strong>Forward cascade</strong></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>cascade_service.py</code>, <code>test_cascade_service.py</code> (15), <code>test_revision_service.py</code> (22)</td></tr>
+        <tr><td>Cascade preview</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>allocations.py:301</code></td></tr>
+        <tr><td>Carry-forward drift report</td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td>N/A</td><td><span class="s s-none">Not Started</span></td><td><span class="s s-part">Partial</span></td><td><code>reconcile_carry_forward.py</code>; no test</td></tr>
+        <tr><td>Append-only audit log (write)</td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-new">Resolved</span> Complete</td><td><code>audit_service.py</code>, DB triggers, <code>test_audit_append_only.py</code> (6); triggers re-verified after the 0005 table rebuild</td></tr>
+        <tr><td>Audit Log viewer + diff modal</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>views/audit.js</code>, <code>test_audit_diff.py</code> (14), <code>test_audit_access.py</code> (15)</td></tr>
+        <tr><td>Date revision summary badge</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><code>audit_report_service.py:295</code>, <code>test_date_revision_summary.py</code> (9)</td></tr>
+        <tr><td>Access diagnostics</td><td><span class="s s-none">Not Started</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-part">Partial</span></td><td><code>/auth/access-diagnostics</code> has no frontend caller</td></tr>
+        <tr><td><strong>Allocation History module</strong></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-part">Partial</span></td><td><span class="s s-ok">Complete</span></td><td><code>views/allocationHistory.js</code>, <code>reports.py:76</code>, <code>report_repo.py:68</code>; no HTTP-level test</td></tr>
+        <tr><td>Metal Flow History</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-part">Partial</span></td><td><span class="s s-ok">Complete</span></td><td><code>views/flowHistory.js</code>, <code>reports.py:350</code>; <code>test_cycle_delta.py</code> only</td></tr>
+        <tr><td>Analysis Dashboard</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-part">Partial</span></td><td><span class="s s-ok">Complete</span></td><td><code>views/analysis.js</code>, <code>report_service.py:157</code>, <code>test_dashboard_rules.py</code> (4)</td></tr>
+        <tr><td>Nav count pills</td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-none">Not Started</span></td><td><span class="s s-ok">Complete</span></td><td><code>reports.py:499</code></td></tr>
+        <tr><td>Dark mode / theming</td><td><span class="s s-ok">Complete</span></td><td>N/A</td><td>N/A</td><td>N/A</td><td><span class="s s-ok">Complete</span></td><td><code>theme.css</code> (479), <code>lib/theme.js</code></td></tr>
+        <tr><td>Chart engine (hand-written SVG)</td><td><span class="s s-part">Partial</span></td><td>N/A</td><td>N/A</td><td><span class="s s-none">Not Started</span></td><td><span class="s s-part">Partial</span></td><td>3 legacy features absent — see section 12</td></tr>
+        <tr><td>Party / priority filters in the UI</td><td><span class="s s-none">Not Started</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-ok">Complete</span></td><td><span class="s s-none">Not Started</span></td><td><span class="s s-plan">Planned</span></td><td>Backend accepts <code>party_id</code>; <code>filterBar.js</code> does not expose it</td></tr>
+        <tr><td>CSV export</td><td><span class="s s-none">Not Started</span></td><td><span class="s s-none">Not Started</span></td><td>N/A</td><td>N/A</td><td><span class="s s-plan">Planned</span></td><td>Named in three <code>PROMPT_*.md</code> files; no code</td></tr>
+        <tr><td>Toast notifications</td><td><span class="s s-none">Not Started</span></td><td>N/A</td><td>N/A</td><td>N/A</td><td><span class="s s-plan">Planned</span></td><td>CSS ships at <code>tokens.css:591</code>; no JS</td></tr>
+        <tr><td>PostgreSQL migration</td><td>N/A</td><td><span class="s s-none">Not Started</span></td><td><span class="s s-none">Not Started</span></td><td><span class="s s-none">Not Started</span></td><td><span class="s s-plan">Planned</span></td><td>Needs an advisory lock — <code>allocation_service.py:310</code></td></tr>
+        <tr><td>Legacy file retirement</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td><span class="s s-none">Not Started</span></td><td>All 20 files still in <code>legacy files/</code> — correct, nothing browser-verified yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================================================== 7 ============ -->
+<section id="s7">
+  <h2><span class="num">07</span> Business Rules</h2>
+  <p class="lede">Read out of the implementing code, not from documentation. A specification is not treated as implemented unless matching code exists.</p>
+
+  <h3>Rule toggles — <code>rmas/rules/business_rules.py</code></h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Toggle</th><th>State</th><th>Enforced at</th><th>Origin</th><th>Tests</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>REQUIRE_POSITIVE_ACQUIRED</code></td><td><span class="s s-on">On</span></td><td><code>validation_service.py:180</code></td><td>Legacy</td><td>&#10003;</td><td>The only save rule that bites</td></tr>
+        <tr><td><code>ALLOW_ADMIN_REVISION</code></td><td><span class="s s-on">On</span></td><td><code>allocation_service.py:656</code></td><td>Legacy</td><td>&#10003;</td><td>Also gates <code>can_revise</code></td></tr>
+        <tr><td><code>REQUIRE_REVISION_REASON</code> (min 10)</td><td><span class="s s-on">On</span></td><td><code>validation_service.py:352</code></td><td>Legacy</td><td>&#10003;</td><td>Also checked client-side</td></tr>
+        <tr><td><code>CARRY_FORWARD_FROM_LATEST_SAVED</code></td><td><span class="s s-on">On</span></td><td><code>date_service.py:113</code></td><td>Legacy</td><td>&#10003;</td><td></td></tr>
+        <tr><td><code>REQUIRE_FULL_ALLOCATION</code></td><td><span class="s s-off">Off</span></td><td><code>validation_service.py:199</code></td><td>Legacy</td><td>—</td><td><strong>Unresolved conflict</strong> with the "final business decisions" document</td></tr>
+        <tr><td><code>REQUIRE_POSITIVE_ALLOTED</code></td><td><span class="s s-off">Off</span></td><td><code>validation_service.py:186</code></td><td>Legacy</td><td>—</td><td><strong>Same unresolved conflict</strong></td></tr>
+        <tr><td><code>BLOCK_OVER_ALLOCATION</code></td><td><span class="s s-off">Off</span></td><td><code>validation_service.py:193</code></td><td>Legacy</td><td>—</td><td>Over-allocation permitted; utilisation may exceed 100%</td></tr>
+        <tr><td><code>OPERATOR_REQUIRED_WITHIN_ACQUIRED</code></td><td><span class="s s-off">Off</span></td><td><code>staging_service.py:109</code></td><td>Legacy</td><td>—</td><td>Demand may legitimately exceed supply</td></tr>
+        <tr><td><code>ALLOW_ZERO_PREVIOUS_REQUIREMENT</code></td><td><span class="s s-inert">Inert</span></td><td><em>nowhere</em></td><td>Legacy</td><td>—</td><td>No conditional reads it, here or in legacy</td></tr>
+        <tr><td><code>ALLOW_ZERO_CLOSING_BALANCE</code></td><td><span class="s s-inert">Inert</span></td><td><em>nowhere</em></td><td>Legacy</td><td>—</td><td>Same</td></tr>
+        <tr><td><code>SAVED_DATE_IMMUTABLE_FOR_USERS</code></td><td><span class="s s-inert">Inert</span></td><td><em>nowhere</em></td><td>Legacy</td><td>—</td><td>Behaviour holds via <code>date_exists</code> checks instead</td></tr>
+      </tbody>
+      <caption>
+        The three inert toggles are open question #2 from
+        <code>sessions/2026-09-19_rmas-legacy-review/session.md</code>, still unresolved. They are documented
+        as data-only rather than turned into guards — the correct conservative reading.
+      </caption>
+    </table>
+  </div>
+
+  <h3>Implemented rules</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Rule</th><th>Source file</th><th>Function / class</th><th>Origin</th><th>Tests</th><th>Uncertainty</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><code>balance = previous_requirement + today_required &minus; alloted</code></td><td><code>validation_service.py:125</code></td><td><code>compute_balance_g</code></td><td>Legacy</td><td><code>test_balance_arithmetic.py</code></td><td>—</td></tr>
+        <tr><td>2</td><td>Weights are integer grams; <code>float</code> rejected at the boundary</td><td><code>weight_service.py:40</code></td><td><code>to_decimal</code></td><td><strong>New</strong> (legacy used float kg)</td><td><code>test_weight_service.py</code></td><td>—</td></tr>
+        <tr><td>3</td><td>Round <code>ROUND_HALF_UP</code> to 3 dp at every boundary</td><td><code>weight_service.py:28</code></td><td><code>round_kg</code></td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>4</td><td>Epsilon comparison becomes exact equality in grams</td><td><code>validation_service.py:46</code></td><td><code>nearly_equal_g</code></td><td>Reasoned from legacy</td><td>&#10003;</td><td><code>EPSILON</code> must <strong>not</strong> be converted to 1&nbsp;g</td></tr>
+        <tr><td>5</td><td><code>MAX_WEIGHT_KG = 100000</code> sanity ceiling</td><td><code>validation_service.py:107,120</code></td><td><code>assert_*_weight</code></td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>6</td><td>Derived weights may be negative; inputs may not</td><td><code>validation_service.py:98,112</code></td><td>same</td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>7</td><td>Monday &rarr; Saturday (&minus;2); otherwise &minus;1 day</td><td><code>date_service.py:51</code></td><td><code>previous_source_date</code></td><td>Legacy</td><td><code>test_date_service.py</code> (all 7 weekdays)</td><td>—</td></tr>
+        <tr><td>8</td><td>Gap fallback = latest saved date before <em>selected</em>, not before the rule date</td><td><code>date_service.py:117</code></td><td><code>resolve_source_date</code></td><td>Legacy</td><td><code>test_allocation_model.py</code></td><td>Can return a date <em>later</em> than the rule date — deliberate</td></tr>
+        <tr><td>9</td><td>Allocation and flow ledgers resolve source dates <strong>independently</strong></td><td><code>allocation_service.py:162-165</code></td><td><code>build_allocation_model</code></td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>10</td><td>A sector absent from its source date carries <strong>zero</strong></td><td><code>allocation_service.py:194</code>, <code>cascade_service.py:173</code></td><td>both</td><td>Legacy</td><td><code>test_cascade_service.py</code></td><td>—</td></tr>
+        <tr><td>11</td><td><code>previous_requirement</code> is <strong>derived</strong>, never accepted from the client</td><td><code>validation_service.py:298</code></td><td><code>validate_and_normalize_payload</code></td><td><strong>New</strong> (hardening)</td><td><code>test_allocation_save.py</code></td><td><code>AllocationRowInput</code> still accepts-and-ignores it</td></tr>
+        <tr><td>12</td><td>Payload rebuilt from live DB definitions, matched by sector id</td><td><code>validation_service.py:271-288</code></td><td>same</td><td>Legacy</td><td>&#10003;</td><td>Row order cannot corrupt a save</td></tr>
+        <tr><td>13</td><td>Row counts must match the scoped definition counts</td><td><code>validation_service.py:274,280</code></td><td>same</td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>14</td><td>Only administrators may save</td><td><code>allocation_service.py:325</code></td><td><code>save_daily_allocation</code></td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>15</td><td>A saved date is immutable — revise instead</td><td><code>allocation_service.py:344</code> + <code>UNIQUE(date, sector_id)</code></td><td>same</td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>16</td><td>Revision replaces the date wholesale; revision number = latest SUCCESS + 1</td><td><code>allocation_service.py:792,809</code></td><td><code>revise_daily_allocation</code></td><td>Legacy</td><td><code>test_revision_service.py</code></td><td>—</td></tr>
+        <tr><td>17</td><td><strong>Forward cascade</strong> recomputes later dates' <code>previous_requirement</code> and <code>balance</code></td><td><code>cascade_service.py:98</code></td><td><code>cascade_forward</code></td><td><strong>New — legacy never did this</strong></td><td><code>test_cascade_service.py</code></td><td>Deliberate correction of a legacy defect</td></tr>
+        <tr><td>18</td><td>Cascade never touches <code>today_required</code>, <code>alloted</code>, <code>acquired</code> or the snapshots</td><td><code>cascade_service.py:18-27</code>, <code>allocation_repo.py:113</code></td><td><code>apply_recalculation</code></td><td>New</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>19</td><td><code>propagate_only</code> — a revision must not silently repair pre-existing drift</td><td><code>cascade_service.py:157</code></td><td><code>cascade_forward</code></td><td>New</td><td>&#10003;</td><td>Drift surfaced by <code>reconcile_carry_forward.py</code> instead</td></tr>
+        <tr><td>20</td><td>Revision + cascade + every audit entry commit as one transaction</td><td><code>allocation_service.py:951</code></td><td><code>revise_daily_allocation</code></td><td>New</td><td>&#10003;</td><td>Replaces legacy's fragile delete-then-restore</td></tr>
+        <tr><td>21</td><td>Submission is one shot per party per date, at <strong>any</strong> status</td><td><code>staging_repo.py:42</code></td><td><code>any_rows_for_parties</code></td><td>Legacy</td><td><code>test_staging_submission.py</code></td><td>—</td></tr>
+        <tr><td>22</td><td>Admins cannot submit; operators cannot save</td><td><code>staging_service.py:220</code>, <code>allocation_service.py:325</code></td><td>—</td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>23</td><td>Out-of-scope sector in a submission is refused, not silently dropped</td><td><code>staging_service.py:275</code></td><td><code>submit_requirements</code></td><td><strong>New</strong> (legacy dropped)</td><td>&#10003;</td><td>Flagged as a deliberate improvement</td></tr>
+        <tr><td>24</td><td>A staged zero still overlays — "needs nothing" is a statement</td><td><code>staging_service.py:150</code></td><td><code>apply_staging_to_model</code></td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>25</td><td>The masters win once saved — staging is only a proposal</td><td><code>staging_service.py:138</code></td><td>same</td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>26</td><td>Commit marks staging <code>CONSUMED</code>, never deletes; its failure never reverses the save</td><td><code>allocation_service.py:402-405</code></td><td>—</td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>27</td><td>The deny list always overrides an admin grant</td><td><code>scope_service.py:44</code></td><td><code>is_administrator</code></td><td>Legacy</td><td><code>test_scope_service.py</code></td><td>Suppresses admin status only, never login</td></tr>
+        <tr><td>28</td><td>An empty flow-grant list means "fall back to party", <strong>not</strong> deny</td><td><code>scope_service.py:78,96</code></td><td><code>build_scope</code></td><td>Legacy</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>29</td><td>Scope applied in SQL <code>WHERE</code>; empty grants fail closed</td><td><code>sector_repo.py:21</code></td><td><code>_restrict_to_scope</code></td><td>Legacy + rule 8</td><td><code>test_sector_scoping.py</code></td><td>—</td></tr>
+        <tr><td>30</td><td>Never return the admin roster or another account's scope</td><td><code>schemas/auth.py:30-42</code>, <code>scope_service.py:131</code></td><td><code>diagnose_access</code></td><td>Rule 10 (legacy leaked it)</td><td><code>test_audit_access.py</code></td><td>—</td></tr>
+        <tr><td>31</td><td>Audit log append-only — DB triggers, not convention</td><td>migration <code>0002</code>, <code>audit_repo.py</code></td><td>—</td><td>Legacy + rule 13</td><td><code>test_audit_append_only.py</code></td><td>No update or delete function exists at any layer</td></tr>
+        <tr><td>32</td><td>Failed and blocked attempts are audited, not just successes</td><td><code>allocation_service.py:465,965</code>, <code>staging_service.py:384</code></td><td>—</td><td>Legacy + rule 14</td><td>&#10003;</td><td>Save path was fixed to audit <code>ValidationError</code> too</td></tr>
+        <tr><td>33</td><td>Auditing must never block or reverse a completed operation</td><td><code>audit_service.py:165</code></td><td><code>write_entry_safely</code></td><td>Legacy</td><td>—</td><td>—</td></tr>
+        <tr><td>34</td><td><code>RECALCULATE</code> is distinct from <code>REVISE</code> — the Revisions KPI counts edits only</td><td><code>audit_service.py:51</code>, <code>audit_repo.py:127</code></td><td>—</td><td>New</td><td>&#10003;</td><td>—</td></tr>
+        <tr><td>35</td><td>Undated audit entries are <strong>spared</strong> by the date window</td><td><code>audit_repo.py:57-61</code></td><td><code>_apply_audit_filters</code></td><td><code>PROMPT_audit_log.md</code> rule 4</td><td><code>test_audit_access.py</code></td><td>Required migration <code>0004</code></td></tr>
+        <tr><td>36</td><td>"Originally saved by" = <em>first</em> SAVE; "last revised" = <em>newest</em> REVISE</td><td><code>audit_report_service.py:318</code></td><td><code>get_date_revision_summary</code></td><td>Legacy</td><td><code>test_date_revision_summary.py</code></td><td>Not admin-gated, deliberately</td></tr>
+        <tr><td>37</td><td>A malformed snapshot degrades to an empty diff, never breaks the request</td><td><code>audit_report_service.py:77</code></td><td><code>_load</code></td><td><code>PROMPT_audit_log.md</code> rule 12</td><td><code>test_audit_diff.py</code></td><td>—</td></tr>
+        <tr><td>38</td><td>A sector present on one side only counts every field as changed</td><td><code>audit_report_service.py:188</code></td><td><code>_diff</code></td><td>Legacy</td><td><code>test_audit_diff.py</code></td><td>—</td></tr>
+        <tr><td>39</td><td><code>normalize_key</code>: lowercase, collapse whitespace, unify dashes — <strong>keeps</strong> punctuation</td><td><code>validation_service.py:63</code></td><td><code>normalize_key</code></td><td>Legacy</td><td><code>test_validation_service.py</code></td><td><strong>Contradicts <code>DATABASE_OVERVIEW.md</code></strong>; resolved toward legacy</td></tr>
+        <tr><td>40</td><td>Sector filter pushed at the flow ledger only if the name exists there</td><td><code>report_service.py:127</code></td><td><code>_resolve_flow_sector</code></td><td>Dashboard spec rule 2</td><td><code>test_dashboard_rules.py</code></td><td>—</td></tr>
+        <tr><td>41</td><td>Cycle delta: newer half vs older half; null below 4 dates or a zero base</td><td><code>report_service.py:36</code></td><td><code>cycle_delta</code></td><td>Legacy</td><td><code>test_cycle_delta.py</code></td><td>—</td></tr>
+        <tr><td>42</td><td>Closing balance = the <em>latest</em> date's balance, never a sum</td><td><code>report_service.py:259</code></td><td><code>get_dashboard_summary</code></td><td>Legacy</td><td>&#10003;</td><td>Summing would double-count carried balances</td></tr>
+        <tr><td>43</td><td>Utilisation = alloted/acquired; Dashboard fulfilment = alloted/required; <strong>History fulfilment = alloted/(prev+required)</strong></td><td><code>report_service.py:267</code>, <code>reports.py:139</code></td><td>—</td><td>Legacy screenshots</td><td>—</td><td><strong>Two definitions of "fulfilment rate" coexist by design</strong></td></tr>
+        <tr><td>44</td><td>Heatmap window counts back from the newest <em>matched</em> date, not today</td><td><code>reports.py:402-408</code></td><td><code>flow_analysis</code></td><td>Legacy</td><td>—</td><td>—</td></tr>
+        <tr><td>45</td><td>Zero-total flow sectors are dropped from both charts</td><td><code>reports.py:416</code></td><td>same</td><td>Legacy</td><td>—</td><td>—</td></tr>
+        <tr><td>46</td><td>A reversed date range is swapped and a bad limit corrected — not refused</td><td><code>reports.py:104-112</code></td><td><code>allocation_history</code></td><td>Allocation History spec</td><td>—</td><td>—</td></tr>
+        <tr><td>47</td><td>Priority stored verbatim as <code>Priority 1</code>&hellip;<code>6</code>, never parsed</td><td><code>models/sector.py:39</code></td><td>—</td><td>Legacy</td><td><code>test_seed_reference_data.py</code></td><td>Required migration <code>0003</code></td></tr>
+        <tr><td>48</td><td>Sector and party names are data; nothing hard-coded</td><td><code>seed/*.csv</code> &rarr; <code>seed_reference_data.py</code></td><td>—</td><td>Rule 15</td><td><code>test_sector_mapping.py</code></td><td>Verified: no sector-name literal in any <code>.py</code> or <code>.js</code></td></tr>
+        <tr><td>49</td><td>Audit ID = <code>AUD-yyyyMMdd-HHmmss-XXXXXXXX</code> (8 hex)</td><td><code>audit_service.py:58</code></td><td><code>generate_audit_id</code></td><td><strong>Widened</strong> from legacy's 4 digits</td><td>&#10003;</td><td>Deliberate: a cascade writes N ids within one second</td></tr>
+        <tr><td>50</td><td>Request-ID idempotency window of 900 s</td><td><code>idempotency_repo.py:41</code></td><td><code>find_live_entry</code></td><td>Legacy</td><td>&#10003;</td><td><span class="s s-new">Resolved</span> now <strong>replays</strong> the stored result</td></tr>
+        <tr><td>51</td><td>A repeat is never replayed across accounts, across endpoints, or from an unreadable record — it is refused instead</td><td><code>idempotency_service.py</code></td><td><code>replayable_result</code></td><td><strong>New</strong> <span class="s s-new">Resolved</span></td><td><code>test_allocation_save.py</code>, <code>test_staging_submission.py</code></td><td><code>request_id</code> is browser-generated and guessable; refusing to replay never permits a second write</td></tr>
+        <tr><td>52</td><td>A deactivated account loses its session on the next request, on every endpoint</td><td><code>routers/deps.py:34</code></td><td><code>get_current_user</code></td><td><strong>New</strong> <span class="s s-new">Resolved</span></td><td><code>test_auth_flow.py</code> (12)</td><td>401 + cleared session, matching the "account removed" branch beside it</td></tr>
+        <tr><td>53</td><td>Timestamps are stored UTC and displayed in Asia/Kolkata</td><td><code>audit_report_service.py:249</code></td><td><code>format_audit_timestamp</code></td><td><strong>New</strong> <span class="s s-new">Resolved</span></td><td><code>test_audit_diff.py</code> (7)</td><td>Storage unchanged — the audit log's append-only triggers make migrating existing rows impossible</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================================================== 8 ============ -->
+<section id="s8">
+  <h2><span class="num">08</span> Legacy Migration Status</h2>
+  <p class="lede">What is available, what has been analysed, what has been migrated, and where the three sources disagree.</p>
+
+  <h3>Available</h3>
+  <p>
+    All 20 files are present in <code>legacy files/</code> (~10,300 lines): <code>Config.gs</code>,
+    <code>Code.gs</code>, <code>DataService.gs</code>, <code>DateService.gs</code>,
+    <code>ValidationService.gs</code>, <code>StagingService.gs</code>, <code>ReportService.gs</code>,
+    <code>AuditService.gs</code>, <code>AuditReportService.gs</code>, <code>SchemaService.gs</code>,
+    <code>DiagnosticsService.gs</code>, <code>VersionCheck.gs</code>, <code>Index.html</code>,
+    <code>Scripts.html</code>, <code>Reports.html</code>, <code>Audit.html</code>,
+    <code>Styles.html</code>, <code>StylesReports.html</code>, <code>StylesAudit.html</code>, plus
+    <code>README.md</code>.
+  </p>
+
+  <h3>Analysed</h3>
+  <p>
+    All 20. The 2026-09-19 review read the full source and produced <code>FILE_SUMMARIES.md</code> plus ten
+    open questions, eight of which have since been resolved.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Legacy file</th><th>Ports to</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><code>Config.gs</code></td><td><code>config.py</code> + <code>rules/business_rules.py</code></td><td><span class="s s-ok">Migrated</span> all constants and toggles carried over</td></tr>
+        <tr><td><code>DateService.gs</code></td><td><code>services/date_service.py</code></td><td><span class="s s-ok">Migrated</span> <code>STORAGE_HOUR</code> noon hack deliberately dropped</td></tr>
+        <tr><td><code>ValidationService.gs</code></td><td><code>validation_service.py</code> + <code>weight_service.py</code></td><td><span class="s s-ok">Migrated</span></td></tr>
+        <tr><td><code>SchemaService.gs</code></td><td>—</td><td><span class="s s-none">Dropped by design</span> rule 16 — header-label detection is meaningless in SQL</td></tr>
+        <tr><td><code>DataService.gs</code></td><td><code>repository/*</code></td><td><span class="s s-ok">Migrated</span></td></tr>
+        <tr><td><code>Code.gs</code></td><td><code>routers/allocations.py</code> + <code>allocation_service.py</code></td><td><span class="s s-ok">Migrated</span> plus the forward cascade legacy never had</td></tr>
+        <tr><td><code>StagingService.gs</code></td><td><code>staging_service.py</code> + <code>scope_service.py</code></td><td><span class="s s-part">Mostly migrated</span> 3 read endpoints unported</td></tr>
+        <tr><td><code>AuditService.gs</code></td><td><code>audit_service.py</code> (identity moved to <code>scope_service.py</code>)</td><td><span class="s s-ok">Migrated</span></td></tr>
+        <tr><td><code>AuditReportService.gs</code></td><td><code>audit_report_service.py</code></td><td><span class="s s-ok">Migrated</span></td></tr>
+        <tr><td><code>ReportService.gs</code></td><td><code>report_service.py</code> + <code>report_repo.py</code></td><td><span class="s s-ok">Migrated</span></td></tr>
+        <tr><td><code>DiagnosticsService.gs</code></td><td>partially &rarr; <code>/auth/access-diagnostics</code></td><td><span class="s s-part">Partial</span> roster-leaking half deliberately not ported (rule 10)</td></tr>
+        <tr><td><code>VersionCheck.gs</code></td><td>—</td><td><span class="s s-plan">Pending decision</span> open question #7, leaning: not needed</td></tr>
+        <tr><td><code>Index / Scripts / Reports / Audit.html</code></td><td><code>frontend/src/views/*</code></td><td><span class="s s-ok">Migrated</span></td></tr>
+        <tr><td><code>Styles / StylesReports / StylesAudit.html</code></td><td><code>styles/{tokens,reports,audit}.css</code></td><td><span class="s s-ok">Migrated</span> byte-identical; overridden only via <code>theme.css</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Still pending</h3>
+  <ul>
+    <li><code>getOperatorRequirementForDate</code>, <code>getCurrentUserScope</code>, <code>getStagedRequirementsForDate</code> — none had a client caller in legacy. <code>pendingParties</code> (who has <em>not</em> submitted) has no equivalent.</li>
+    <li>CSV export, named in three <code>PROMPT_*.md</code> files.</li>
+    <li>Three chart features visible in <code>Closing Balance Trend.png</code>: the amber gradient area-fill, hollow ringed nodes, and the dark value callout pill. <code>.chart-callout-text</code> already ships unused at <code>reports.css:294</code>.</li>
+    <li>No legacy file has been retired yet — correct, since stage 3 of the lifecycle requires browser verification first.</li>
+  </ul>
+
+  <h3>Contradictions between legacy code, specifications and the implementation</h3>
+  <ol>
+    <li><strong><code>REQUIRE_FULL_ALLOCATION</code> / <code>REQUIRE_POSITIVE_ALLOTED</code></strong> — the code says off, the "final business decisions" document says enforce. Never settled; correctly left untouched.</li>
+    <li><strong><code>normalize_key</code> semantics</strong> — <code>DATABASE_OVERVIEW.md</code> says punctuation and spaces are removed; <code>ValidationService.gs:70-76</code> collapses whitespace and keeps punctuation. Resolved toward legacy, contradiction recorded at <code>validation_service.py:10-28</code>.</li>
+    <li><strong>Idempotency replay</strong> — <span class="s s-new">RESOLVED 2026-09-22</span> in favour of replaying. Legacy returns <code>DUPLICATE_REQUEST</code>, but it <em>could not</em> do otherwise: Apps Script's <code>CacheService</code> held the marker <code>'1'</code>, not a response, so the error is a limitation rather than a decision. All three write paths now replay the stored result; the divergence from legacy is recorded in CLAUDE.md rule 12 so it is not "restored" later.</li>
+    <li><strong><code>schema.sql</code> vs. the live schema</strong> — six documented departures (password hash, widened <code>action_type</code>, nullable <code>allocation_date</code>, <code>parent_audit_id</code>, staging status vocabulary, TEXT priority). It was deliberately not regenerated.</li>
+    <li><strong>Closing Balance Trend label</strong> — legacy says "cumulative physical vault stock position" while plotting summed outstanding balance. The port plots the data unchanged and rewrote the subtitle (<code>analysis.js:19-23</code>).</li>
+    <li><strong>19 vs 21 sectors</strong> — resolved: 21, confirmed against the live database.</li>
+    <li><strong><code>buildTag_Config_()</code> declared twice</strong> in <code>Config.gs</code> (<code>'5C'</code> then <code>'5H'</code>). Noted; the port hard-codes <code>app_version = "5H"</code>.</li>
+  </ol>
+</section>
+
+<!-- ======================================================== 9 ============ -->
+<section id="s9">
+  <h2><span class="num">09</span> Testing and Quality Status</h2>
+  <p class="lede">The suite was executed during this audit. No result below is assumed.</p>
+
+  <div class="note note--ok">
+    <p class="note__title"><span class="s s-ok">Verified</span> Latest test result — run 2026-09-22, after the fixes</p>
+<pre><code>332 passed, 2 warnings in 51.25s      (was 308 at the original audit)</code></pre>
+    <p>
+      <code>rmas/rmas.db</code> md5 was identical before and after the run — the suite builds its own
+      in-memory SQLite engines and does not touch the live database.
+    </p>
+    <p>
+      The 24 added tests were not merely written alongside the fixes: the 12 covering deactivation were
+      each <strong>verified to fail with the guard disabled</strong>, which is the only way to know a
+      test is pinning the behaviour rather than passing by coincidence.
+    </p>
+  </div>
+
+  <h3>Framework</h3>
+  <p>
+    pytest 9.1.1 with <code>fastapi.testclient</code> (httpx). There is no <code>conftest.py</code>; each
+    module constructs its own in-memory SQLite engine with <code>StaticPool</code>, and the four HTTP suites
+    override the <code>get_db</code> dependency.
+  </p>
+
+  <h3>Coverage by area</h3>
+  <div class="scroll">
+    <table class="t-narrow">
+      <thead><tr><th>Area</th><th>File</th><th>Tests</th></tr></thead>
+      <tbody>
+        <tr><td>Carry-forward and screen model</td><td><code>test_allocation_model.py</code></td><td>10</td></tr>
+        <tr><td>Admin save, incl. replay guards <span class="s s-new">+3</span></td><td><code>test_allocation_save.py</code></td><td>16</td></tr>
+        <tr><td>Revision, guards and audit <span class="s s-new">+2</span></td><td><code>test_revision_service.py</code></td><td>22</td></tr>
+        <tr><td>Cascade arithmetic</td><td><code>test_cascade_service.py</code></td><td>15</td></tr>
+        <tr><td>Operator submission <span class="s s-new">+1</span></td><td><code>test_staging_submission.py</code></td><td>23</td></tr>
+        <tr><td>Balance arithmetic</td><td><code>test_balance_arithmetic.py</code></td><td>21</td></tr>
+        <tr><td>Weight precision</td><td><code>test_weight_service.py</code></td><td>7</td></tr>
+        <tr><td>Scope and deny list</td><td><code>test_scope_service.py</code></td><td>18</td></tr>
+        <tr><td>Sector scoping over HTTP</td><td><code>test_sector_scoping.py</code></td><td>7</td></tr>
+        <tr><td>Auth flow, incl. mid-session deactivation <span class="s s-new">+12</span></td><td><code>test_auth_flow.py</code></td><td>25</td></tr>
+        <tr><td>Audit access gate</td><td><code>test_audit_access.py</code></td><td>15</td></tr>
+        <tr><td>Audit append-only triggers</td><td><code>test_audit_append_only.py</code></td><td>6</td></tr>
+        <tr><td>Audit diff semantics + timestamp rendering <span class="s s-new">+7</span></td><td><code>test_audit_diff.py</code></td><td>21</td></tr>
+        <tr><td>Date revision summary</td><td><code>test_date_revision_summary.py</code></td><td>9</td></tr>
+        <tr><td>Sector mapping structure</td><td><code>test_sector_mapping.py</code></td><td>9</td></tr>
+        <tr><td>Seed loader</td><td><code>test_seed_reference_data.py</code></td><td>4</td></tr>
+        <tr><td>Dashboard rules / cycle delta</td><td><code>test_dashboard_rules.py</code> / <code>test_cycle_delta.py</code></td><td>4 / 6</td></tr>
+        <tr><td>Date rule, normalisation, health</td><td><code>test_date_service.py</code> / <code>test_validation_service.py</code> / <code>test_health.py</code></td><td>5 / 5 / 1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Features without tests</h3>
+  <ul>
+    <li><strong>All four <code>/reports/*</code> endpoints at HTTP level</strong> — pagination, summary maths, heatmap windowing, <code>NO_PARTY_ASSIGNED</code>, filter interaction. <code>report_repo.py</code> (323 lines) has no direct test.</li>
+    <li><code>POST /allocations/{date}</code> and <code>/revise</code> at HTTP level — covered at the service level only.</li>
+    <li><code>create_user.py</code> and <code>reconcile_carry_forward.py</code> — no tests.</li>
+    <li><strong>Zero frontend tests.</strong> No JS test runner exists; there is no <code>package.json</code> outside <code>.metal/</code>.</li>
+  </ul>
+
+  <div class="note note--warn">
+    <p class="note__title"><span class="s s-high">High</span> No linting, formatting or type-checking is configured or installed</p>
+    <p>
+      There is no <code>pyproject.toml</code>, <code>ruff.toml</code>, <code>setup.cfg</code> or
+      <code>mypy.ini</code> anywhere in the repository, and neither <code>ruff</code> nor <code>mypy</code> is
+      present in <code>.metal</code> or in <code>requirements.txt</code>. CLAUDE.md section 5 documents
+      <code>ruff check .</code>, <code>ruff format .</code> and <code>mypy rmas/</code> as project commands —
+      <strong>all three fail today</strong>. <code>pytest --cov</code> also fails
+      (<code>pytest-cov</code> is not installed), and <code>cd frontend &amp;&amp; npm install</code> has
+      nothing to install. 13,847 lines of Python have never been statically checked.
+    </p>
+  </div>
+
+  <h3>Warnings and quality risks</h3>
+  <ul>
+    <li>Two deprecation warnings from Starlette's TestClient (<code>httpx</code> &rarr; <code>httpx2</code>; <code>anyio.abc.BlockingPortal</code>). Cosmetic.</li>
+    <li><span class="s s-new">Resolved</span> The un-applied migration has been applied.</li>
+    <li>Nothing has been verified in a browser — now the single largest risk.</li>
+    <li><code>idempotency_repo.release()</code> is dead code — no callers. A failed save rolls back before recording, so the guard is never left behind.</li>
+    <li><code>views/history.js</code>, flagged for deletion in an earlier session, has been correctly removed.</li>
+  </ul>
+</section>
+
+<!-- ======================================================= 10 ============ -->
+<section id="s10">
+  <h2><span class="num">10</span> Environment and Dependencies</h2>
+  <p class="lede">Variable names only — no values, keys or connection strings appear in this document.</p>
+
+  <div class="two-col">
+    <div>
+      <h3>Runtime</h3>
+      <ul>
+        <li><strong>Python expected:</strong> 3.14.0 (<code>.metal/pyvenv.cfg</code>). The code uses <code>X | None</code> unions and <code>from __future__ import annotations</code> — 3.10+ minimum in practice.</li>
+        <li><strong>Virtual environment:</strong> <code>.metal/</code> (gitignored).</li>
+        <li><strong>Dependency files:</strong> <code>requirements.txt</code> only. No <code>pyproject.toml</code>, no <code>package.json</code>, no lockfiles.</li>
+      </ul>
+
+      <h3>Required environment variables</h3>
+      <ul>
+        <li><code>DATABASE_URL</code> — optional; defaults to <code>rmas/rmas.db</code></li>
+        <li><code>APP_NAME</code></li>
+        <li><code>APP_VERSION</code></li>
+        <li><code>APP_TIMEZONE</code></li>
+        <li><code>SESSION_SECRET_KEY</code></li>
+      </ul>
+      <p>
+        <code>rmas/.env</code> exists locally and is gitignored; <code>rmas/.env.example</code> is tracked and
+        contains no real values. <strong>No secret is committed</strong> — <code>git ls-files</code> lists
+        only the example file.
+      </p>
+    </div>
+    <div>
+      <h3>Major packages</h3>
+      <div class="scroll">
+        <table class="t-narrow">
+          <thead><tr><th>Package</th><th>Version</th></tr></thead>
+          <tbody>
+            <tr><td>fastapi</td><td>0.141.1</td></tr>
+            <tr><td>starlette</td><td>1.6.0</td></tr>
+            <tr><td>uvicorn[standard]</td><td>0.53.0</td></tr>
+            <tr><td>pydantic</td><td>2.13.5</td></tr>
+            <tr><td>pydantic-settings</td><td>2.15.0</td></tr>
+            <tr><td>SQLAlchemy</td><td>2.0.54</td></tr>
+            <tr><td>alembic</td><td>1.20.0</td></tr>
+            <tr><td>python-dotenv</td><td>1.2.3</td></tr>
+            <tr><td>itsdangerous</td><td>2.2.0</td></tr>
+            <tr><td>bcrypt</td><td>5.0.0</td></tr>
+            <tr><td>pytest</td><td>9.1.1</td></tr>
+            <tr><td>httpx</td><td>0.28.1</td></tr>
+          </tbody>
+          <caption><code>psycopg[binary]</code> was removed when the database moved to SQLite.</caption>
+        </table>
+      </div>
+
+      <h3>Missing setup</h3>
+      <ul>
+        <li><code>ruff</code>, <code>mypy</code>, <code>pytest-cov</code></li>
+        <li>Any JavaScript toolchain</li>
+        <li>The <code>alembic upgrade head</code> step</li>
+        <li><code>PRAGMA foreign_keys=ON</code> is never issued</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= 11 ============ -->
+<section id="s11">
+  <h2><span class="num">11</span> Git Status</h2>
+  <p class="lede">The original audit changed nothing. This revision adds two commits on a working branch; nothing has been pushed, pulled, merged or reconfigured.</p>
+
+  <div class="two-col">
+    <div>
+      <ul>
+        <li><strong>Current branch:</strong> <code>fix/deactivated-sessions-and-idempotency-replay</code>, branched from <code>main</code> <span class="s s-new">New</span></li>
+        <li><strong>Remote:</strong> <code>origin</code> &rarr; <code>github.com/ROYALCHAINS/Metal-Allocation.git</code> (fetch + push)</li>
+        <li><strong>Tracking:</strong> <code>main</code> &rarr; <code>origin/main</code> — the branch is <strong>ahead 6, behind 0</strong></li>
+        <li><strong>Staged changes:</strong> none</li>
+        <li><strong>Unstaged changes:</strong> none</li>
+        <li><strong>Untracked files:</strong> none — the working tree is completely clean</li>
+        <li><strong>Aligned with remote?</strong> <span class="s s-high">No</span> — six commits unpushed</li>
+      </ul>
+    </div>
+    <div>
+      <h4>Other local branches</h4>
+      <p>All merged into or behind <code>main</code>: <code>feat/chart-value-labels</code>,
+      <code>feat/edit-saved-date</code>, <code>feat/operator-submission-banner</code>,
+      <code>feat/revision-summary-access-diagnostics</code>.</p>
+    </div>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Commit</th><th>Subject</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><code>7688011</code></td><td>fix(port): replay a repeated request, and show timestamps in IST</td><td><span class="s s-new">new</span></td></tr>
+        <tr><td>2</td><td><code>3277f69</code></td><td>fix(auth): end a session when the account is deactivated</td><td><span class="s s-new">new</span></td></tr>
+        <tr><td>3</td><td><code>d4fe3b8</code></td><td>feat(tools): report carry-forward drift left by past revisions</td><td><span class="s s-high">unpushed</span></td></tr>
+        <tr><td>4</td><td><code>233f5c5</code></td><td>feat(ui): the Edit Saved Date workflow, and clearer audit labels</td><td><span class="s s-high">unpushed</span></td></tr>
+        <tr><td>5</td><td><code>3cb488d</code></td><td>feat(allocations): revise a saved date, cascading forward</td><td><span class="s s-high">unpushed</span></td></tr>
+        <tr><td>6</td><td><code>490021b</code></td><td>feat(ui): night mode, and the KPI cards as ledger tiles</td><td><span class="s s-high">unpushed</span></td></tr>
+        <tr><td>7</td><td><code>cef37fe</code></td><td>feat(charts): print values on the plot for the two dashboard charts</td><td><span class="s s-ok">= origin/main</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================================================= 12 ============ -->
+<section id="s12">
+  <h2><span class="num">12</span> Missing Work and Risks</h2>
+  <p class="lede">Ranked Critical, High, Medium, Low. Items closed since the original audit are listed first, struck through, rather than deleted — so this reads as a record of what moved.</p>
+
+  <div class="note note--ok">
+    <p class="note__title"><span class="s s-new">Resolved</span> Closed since the original audit</p>
+    <ul>
+      <li><span class="was">Database one migration behind the code</span> — migration <code>0005</code> applied, rehearsed on a copy first, all row counts and the 39 audit rows preserved.</li>
+      <li><span class="was"><code>is_active</code> never re-checked after login</span> — re-checked on every request; a deactivated account loses its session immediately.</li>
+      <li><span class="was">Rule-12 idempotency contradiction</span> — repeats now replay the stored result; refusals are limited to cross-account, cross-endpoint and unreadable records.</li>
+      <li><span class="was">Audit and staging timestamps stored in UTC</span> — storage stays UTC deliberately; display converts to Asia/Kolkata at the single formatter every screen passes through.</li>
+    </ul>
+    <p>
+      <strong>No Critical items remain.</strong> The highest-ranked open item is now that nothing has
+      been verified in a browser.
+    </p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Rank</th><th>Item</th><th>Detail</th></tr></thead>
+      <tbody>
+        <tr><td><span class="s s-high">High</span></td><td><strong>Nothing has ever been verified in a browser</strong> — now the top open risk</td><td>Every session log ends with "Not seen in a browser." Charts, dark mode, the revise modal, cascade links and tile proportions are all unverified visually. Highest exposure in <em>night mode</em> and <em>Edit Saved Date</em>. A real save and a real revise have also never been driven end-to-end against live data.</td></tr>
+        <tr><td><span class="s s-high">High</span></td><td><strong>Foreign keys declared but not enforced</strong></td><td><code>PRAGMA foreign_keys = 0</code>. Every FK in section 5 is decorative today. Enabling it is a deliberate decision, not a default to flip casually.</td></tr>
+        <tr><td><span class="s s-high">High</span></td><td><strong>No lint, format or type-check tooling</strong></td><td>CLAUDE.md section 5 documents three commands that cannot run.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td>Six parties own no sectors</td><td>Aqua, ARK, IHG, Titan, Malabar and Aditya Birla have supply rows but no demand sectors; <code>Factory</code> owns 8 sectors but has no flow row. Confirmed correct data (2026-09-21), but an operator scoped to one of the six sees empty screens with no explanation.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td><strong>Live scope discrepancy</strong></td><td><code>pc2.rcpl@gmail.com</code> is scoped to <strong>Royal Chain</strong> in <code>user_party_scope</code>; legacy <code>Config.gs:73</code> mapped that email to <strong>Aalishaan</strong>. Deliberate reassignment or transcription error — unconfirmed, and someone's data visibility depends on the answer.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td>No HTTP-level tests for <code>/reports/*</code></td><td><code>report_repo.py</code> (323 lines) is untested; pagination, summary maths and heatmap windowing rest on manual verification.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td>Carry-forward drift found, undecided</td><td><code>reconcile_carry_forward.py</code> reports <strong>2 dates, 14 sectors</strong> of pre-existing drift from past revisions. The script deliberately has no <code>--fix</code>; a person must classify each case.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td><code>/auth/access-diagnostics</code> has no frontend caller</td><td>Fully implemented and tested, but unreachable from the UI.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td><code>GET /reports/flow-history</code> has no frontend caller</td><td>Metal Flow History uses <code>/flow-analysis</code>; this endpoint is live but unused.</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td>Cascade recalculation invisible on the Daily screen</td><td><code>get_date_revision_summary</code> partitions on literal <code>REVISE</code>/<code>SAVE</code>, so a cascaded date's banner says nothing despite its figures and revision number having changed (Decision 9, unbuilt).</td></tr>
+        <tr><td><span class="s s-med">Medium</span></td><td>Session cookie has no <code>https_only</code>, no CSRF token</td><td><code>SameSite=Lax</code> is the only cross-site protection, and state-changing requests are cookie-authenticated. Acceptable on a LAN; needs review before any public deployment. The default <code>session_secret_key</code> in <code>config.py:40</code> is insecure but is overridden in <code>.env</code>.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td>Three chart features from the screenshot absent</td><td>Gradient area-fill, hollow ringed nodes, value callout pill. <code>.chart-callout-text</code> ships unused at <code>reports.css:294</code>.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td>Success banners wiped almost immediately</td><td>The post-save and post-submit <code>load()</code> calls <code>banner('', '')</code> before repainting — <code>allocation.js:566</code>.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td>Party and priority filters not exposed in the UI</td><td>Backend accepts <code>party_id</code>; <code>filterBar.js</code> offers dates, sector and status only.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td>CSV export and toasts unbuilt</td><td>Named in three <code>PROMPT_*.md</code> files; the toast CSS already ships.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td><strong>Documentation drift inside the code</strong></td><td><code>validation_service.py:5-8</code> still says "PARTIAL PORT&hellip; the rest is still to be ported" — the whole module is ported. <code>views/dashboard.js:5-8</code> says the Analysis Dashboard "is not built yet" and its tab is disabled — it is built and enabled.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td><code>FILE_SUMMARIES.md</code> path</td><td>CLAUDE.md section 7 cites <code>docs/FILE_SUMMARIES.md</code>; the file is at the repository root. Open question #9.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td>Dead code</td><td><code>idempotency_repo.release()</code> (no callers), <code>audit_repo.get_entries_for_date()</code>; <code>LockTimeoutError</code> and <code>LOCK_TIMEOUT_MS</code> are orphans — SQLite serialises writers implicitly. <code>response_json</code> is no longer among these: it is now read back on a replay.</td></tr>
+        <tr><td><span class="s s-low">Low</span></td><td>Six unpushed commits, on a working branch</td><td>The work exists only on this machine, and <code>rmas.db</code> plus <code>seed/*.csv</code> are gitignored or untracked. <code>main</code> has not been fast-forwarded onto the fix branch yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================================================= 13 ============ -->
+<section id="s13">
+  <h2><span class="num">13</span> Recommended Next Steps</h2>
+  <p class="lede">Re-ranked after the first four actions were completed. Steps 1, 2 and 4 of the original list are done; what follows is the current five.</p>
+
+  <div class="note note--ok">
+    <p class="note__title"><span class="s s-new">Done</span> From the original list</p>
+    <p>
+      <strong>1. Apply migration 0005</strong> — applied, rehearsed on a copy, verified against the
+      pre-migration backup. <strong>2. Close the <code>is_active</code> session hole</strong> — fixed,
+      with 12 tests each verified to fail without the guard. <strong>4. Close the two live
+      contradictions</strong> — both resolved in the directions chosen, and recorded in CLAUDE.md so
+      neither is reverted by someone comparing against legacy.
+    </p>
+  </div>
+
+  <div class="step">
+    <div class="step__head"><span class="step__n">1</span><span class="step__t">Verify the whole application in a browser, both themes</span><span class="s s-high">High</span></div>
+    <dl>
+      <dt>What</dt><dd>Run <code>uvicorn main:app --reload</code> from <code>rmas/</code> and walk all five screens at 1440 / 767 / 400&nbsp;px in light and dark: revise button &rarr; revision mode &rarr; reason modal &rarr; cascade line &rarr; audit detail parent/child links; the heat ramp; native date pickers; the KPI tiles; sign-out; nav repaint with theme state intact. Confirm the audit log now shows IST.</dd>
+      <dt>Why</dt><dd><strong>Nothing in this project has ever been looked at.</strong> It was the third item before and is the first now, because the two Critical blockers ahead of it are closed. Night mode and Edit Saved Date carry the most exposure, and <code>.btn--link</code> inside <code>.snapshot-note</code> still has no dark rule in <code>theme.css</code>.</dd>
+      <dt>Files</dt><dd><code>frontend/src/views/*</code>, <code>frontend/src/styles/theme.css</code>, <code>frontend/src/components/charts.js</code></dd>
+      <dt>Depends on</dt><dd>Nothing — the write paths now work.</dd>
+      <dt>Done when</dt><dd>Each screen is confirmed against its <code>PROMPT_*.md</code> and its PNG, and every visual defect is logged.</dd>
+    </dl>
+  </div>
+
+  <div class="step">
+    <div class="step__head"><span class="step__n">2</span><span class="step__t">Drive one real save and one real revise end to end</span><span class="s s-high">High</span></div>
+    <dl>
+      <dt>What</dt><dd>Commit a date through the UI, then revise it with a reason, and confirm the ledger rows, the <code>REVISE</code> entry, one <code>RECALCULATE</code> entry per cascaded date, and the parent/child links in the audit detail.</dd>
+      <dt>Why</dt><dd>The migration was verified at the schema level — a <code>RECALCULATE</code> row carrying a <code>parent_audit_id</code> was accepted inside a rolled-back transaction — but no real write has been made. This is a business action on real data, which is why it was deliberately left to a person.</dd>
+      <dt>Files</dt><dd>None — an operational check against <code>rmas/rmas.db</code>.</dd>
+      <dt>Depends on</dt><dd>Step 1, ideally on the same pass.</dd>
+      <dt>Done when</dt><dd>A revision and its cascade appear correctly in the Audit Log, and <code>reconcile_carry_forward.py</code> reports no NEW drift.</dd>
+    </dl>
+  </div>
+
+  <div class="step">
+    <div class="step__head"><span class="step__n">3</span><span class="step__t">Install the quality tooling and add <code>/reports/*</code> HTTP tests</span><span class="s s-med">Medium</span></div>
+    <dl>
+      <dt>What</dt><dd>Add <code>ruff</code>, <code>mypy</code> and <code>pytest-cov</code> to <code>requirements.txt</code> with a <code>pyproject.toml</code> — or correct CLAUDE.md section 5 and its <code>npm</code> block to describe what actually exists. Then add HTTP-level tests for the four report endpoints: pagination, summary maths, heatmap windowing, <code>NO_PARTY_ASSIGNED</code>, and scope leakage.</dd>
+      <dt>Why</dt><dd>13,847 lines have never been statically checked, and <code>report_repo.py</code> — which carries every scope filter on the read side — still has no direct test. It is the largest remaining test gap.</dd>
+      <dt>Files</dt><dd><code>requirements.txt</code>, new <code>pyproject.toml</code>, new <code>rmas/tests/test_report_endpoints.py</code>, CLAUDE.md section 5</dd>
+      <dt>Depends on</dt><dd>Nothing.</dd>
+      <dt>Done when</dt><dd><code>ruff check .</code>, <code>mypy rmas/</code> and <code>pytest --cov</code> all run, and the report endpoints have HTTP coverage including an operator-scope leakage test.</dd>
+    </dl>
+  </div>
+
+  <div class="step">
+    <div class="step__head"><span class="step__n">4</span><span class="step__t">Decide the two open data questions</span><span class="s s-med">Medium</span></div>
+    <dl>
+      <dt>What</dt><dd><strong>(a)</strong> The carry-forward drift <code>reconcile_carry_forward.py</code> reports — 2 dates, 14 sectors — needs classifying case by case; the script deliberately has no <code>--fix</code> because it cannot tell drift from a deliberate manual adjustment. <strong>(b)</strong> Confirm whether <code>pc2.rcpl@gmail.com</code> should be scoped to Royal Chain (as the database says) or Aalishaan (as legacy <code>Config.gs:73</code> said).</dd>
+      <dt>Why</dt><dd>Both affect real figures and real data visibility, and neither can be resolved from the code.</dd>
+      <dt>Files</dt><dd><code>rmas/reconcile_carry_forward.py</code>, <code>user_party_scope</code></dd>
+      <dt>Depends on</dt><dd>A human decision on each.</dd>
+      <dt>Done when</dt><dd>Each drifted date is confirmed or corrected, and the operator's scope is confirmed.</dd>
+    </dl>
+  </div>
+
+  <div class="step">
+    <div class="step__head"><span class="step__n">5</span><span class="step__t">Push, and tidy the small stale notes</span><span class="s s-low">Low</span></div>
+    <dl>
+      <dt>What</dt><dd>Fast-forward <code>main</code> onto the fix branch and push the six commits. Then clear the low-value drift: <code>validation_service.py:5-8</code> still says "PARTIAL PORT" for a fully ported module, and <code>views/dashboard.js:5-8</code> says the Analysis Dashboard "is not built yet" when it is built and enabled.</dd>
+      <dt>Why</dt><dd>The work currently exists only on this machine, and <code>rmas.db</code> is gitignored — there is no second copy of the data outside the local backup. The stale docstrings actively mislead the next reader.</dd>
+      <dt>Files</dt><dd><code>rmas/services/validation_service.py</code>, <code>frontend/src/views/dashboard.js</code></dd>
+      <dt>Depends on</dt><dd>Nothing.</dd>
+      <dt>Done when</dt><dd><code>origin/main</code> matches local, and neither docstring contradicts its own module.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ======================================================= 14 ============ -->
+<section id="s14">
+  <h2><span class="num">14</span> Final Status Summary</h2>
+
+  <div class="verdict">
+    <div><dt>Completed estimate</dt><dd>~90%<div class="bar"><i style="width:90%"></i></div></dd></div>
+    <div><dt>Current milestone</dt><dd>Audit follow-through &mdash; complete</dd></div>
+    <div><dt>Ready for next phase</dt><dd><span class="s s-new">Yes, with one caveat</span></dd></div>
+    <div><dt>Largest blocker</dt><dd>Never verified in a browser</dd></div>
+  </div>
+
+  <h3>Completion breakdown</h3>
+  <div class="scroll">
+    <table class="t-narrow">
+      <thead><tr><th>Area</th><th>Estimate</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td>Backend</td><td>~95%</td><td>Every endpoint the frontend needs exists, plus two it does not use; both contradictions closed</td></tr>
+        <tr><td>Frontend</td><td>~85%</td><td>All five screens built; CSV export, toasts, party/priority filters and three chart flourishes outstanding</td></tr>
+        <tr><td>Database</td><td><strong>100% designed and deployed</strong> <span class="s s-new">Resolved</span></td><td>Migration <code>0005</code> applied and verified against the pre-migration backup</td></tr>
+        <tr><td>Tests</td><td>~85%</td><td>Backend strong (332), report endpoints still thin, frontend still zero</td></tr>
+        <tr><td>Documentation</td><td>~97%</td><td>Both live contradictions resolved and recorded; two stale docstrings remain (section 12)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Current milestone</h3>
+  <p>
+    <em>Audit follow-through</em> — complete. Migration <code>0005</code> applied
+    (<code>3cb488d</code>&hellip;<code>d4fe3b8</code> deployed), the <code>is_active</code> session hole
+    closed (<code>3277f69</code>), and both live contradictions resolved (<code>7688011</code>). The
+    previous milestone, <em>Edit Saved Date + forward cascade</em>, is now actually runnable rather than
+    merely written.
+  </p>
+
+  <h3>Ready for next phase?</h3>
+  <p>
+    <strong>Yes, with one caveat.</strong> No Critical items remain and the full suite is green at 332.
+    The caveat is real and should not be glossed: <strong>none of this has been seen in a browser</strong>,
+    and no real save or revise has been driven end to end against live data. That is verification work
+    rather than construction work — which is exactly what the next phase should open with.
+  </p>
+
+  <div class="note">
+    <p class="note__title">Recommended immediate next action</p>
+    <p>
+      Run <code>uvicorn main:app --reload</code> from <code>rmas/</code> and walk the five screens in
+      both themes, committing and then revising a real date as you go. That single pass closes the two
+      highest-ranked open risks at once — the unverified UI, and the untested end-to-end write path.
+    </p>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <p>
+    <strong>Royal Metal Allocation System — Project Status Audit.</strong>
+    Originally generated 22 September 2026 against <code>main</code> @ <code>d4fe3b8</code> as a
+    <em>read-only</em> audit: no files modified, no migrations run, no git state changed, the suite run
+    against in-memory SQLite only, and the migration-drift finding confirmed against a copy of the
+    database rather than the live file.
+  </p>
+  <p>
+    <strong>Revised the same day</strong> against
+    <code>fix/deactivated-sessions-and-idempotency-replay</code> @ <code>7688011</code>, after the first
+    four recommended actions were carried out. Those actions did change the project: migration
+    <code>0005</code> was applied to <code>rmas/rmas.db</code> (backed up first to
+    <code>rmas/rmas-backup-pre0005.db</code>, and verified afterwards against it), and two commits were
+    made on a working branch. Nothing has been pushed.
+  </p>
+  <p>
+    No business rule, sector, party, purity, database relationship or completed feature has been assumed or
+    invented; every conclusion cites the file and, where available, the line it came from. No password,
+    token, API key, connection string or <code>.env</code> value appears anywhere in this document.
+  </p>
+</footer>
+
+</body>
+</html>

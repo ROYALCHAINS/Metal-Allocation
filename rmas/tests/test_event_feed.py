@@ -218,3 +218,116 @@ def test_the_feed_carries_no_weights(client, db_session) -> None:
 
 def test_the_feed_requires_a_session(client) -> None:
     assert client.get("/events").status_code == 401
+
+
+# ------------------------------------------------- offline -> online catch-up
+#
+# The cursor lives in the browser's localStorage, keyed per account, so it
+# SURVIVES SIGN-OUT. These pin the server half of that: polling from a cursor
+# taken before the sign-out must return everything that happened in between.
+# A per-page-load baseline could not do this, and did not — an event raised
+# while a user was signed out was skipped permanently.
+
+
+def test_events_raised_while_signed_out_arrive_on_the_next_sign_in(
+    client, db_session
+) -> None:
+    """The administrator's case: an operator submits while they are away."""
+    _user(db_session, "admin@royalchains.com", is_admin=True)
+    _user(db_session, "op@royalchains.com", display_name="Snehal")
+
+    _login(client, "admin@royalchains.com")
+    cursor = client.get("/events").json()["cursor"]
+    client.post("/auth/logout")
+
+    _entry(db_session, action="SUBMIT_REQUIREMENT", email="op@royalchains.com")
+    _entry(
+        db_session,
+        action="SUBMIT_REQUIREMENT",
+        email="op@royalchains.com",
+        date="2026-09-24",
+    )
+
+    _login(client, "admin@royalchains.com")
+    events = client.get("/events", params={"after": cursor}).json()["events"]
+    assert len(events) == 2, "both missed submissions, not none"
+    assert all("Snehal" in e["message"] for e in events)
+
+
+def test_the_operator_hears_about_a_save_made_while_they_were_away(
+    client, db_session
+) -> None:
+    """The mirror case, which is the half that would be easy to leave out."""
+    _user(db_session, "admin@royalchains.com", is_admin=True, display_name="Shubham")
+    _user(db_session, "op@royalchains.com")
+
+    _login(client, "op@royalchains.com")
+    cursor = client.get("/events").json()["cursor"]
+    client.post("/auth/logout")
+
+    _entry(db_session, action="SAVE", email="admin@royalchains.com")
+    _entry(db_session, action="REVISE", email="admin@royalchains.com")
+
+    _login(client, "op@royalchains.com")
+    events = client.get("/events", params={"after": cursor}).json()["events"]
+    assert [e["kind"] for e in events] == ["save", "revision"]
+
+
+def test_catching_up_does_not_replay_on_the_sign_in_after_that(
+    client, db_session
+) -> None:
+    """Catch-up must be once. The cursor the client stores after the catch-up
+    poll has to leave those events behind."""
+    _user(db_session, "admin@royalchains.com", is_admin=True)
+    _user(db_session, "op@royalchains.com")
+
+    _login(client, "admin@royalchains.com")
+    cursor = client.get("/events").json()["cursor"]
+    client.post("/auth/logout")
+    _entry(db_session, action="SUBMIT_REQUIREMENT", email="op@royalchains.com")
+
+    _login(client, "admin@royalchains.com")
+    caught_up = client.get("/events", params={"after": cursor}).json()
+    assert len(caught_up["events"]) == 1
+    client.post("/auth/logout")
+
+    _login(client, "admin@royalchains.com")
+    again = client.get("/events", params={"after": caught_up["cursor"]}).json()
+    assert again["events"] == [], "the same event must not toast on every sign-in"
+
+
+def test_two_accounts_on_one_browser_keep_separate_positions(
+    client, db_session
+) -> None:
+    """localStorage is keyed per account, so one person signing in must not
+    consume the notifications waiting for the other."""
+    _user(db_session, "admin@royalchains.com", is_admin=True)
+    _user(db_session, "op@royalchains.com")
+
+    _login(client, "admin@royalchains.com")
+    admin_cursor = client.get("/events").json()["cursor"]
+    _login(client, "op@royalchains.com")
+    op_cursor = client.get("/events").json()["cursor"]
+
+    _entry(db_session, action="SUBMIT_REQUIREMENT", email="op@royalchains.com")
+
+    _login(client, "admin@royalchains.com")
+    assert len(client.get("/events", params={"after": admin_cursor}).json()["events"]) == 1
+
+    _login(client, "op@royalchains.com")
+    assert client.get("/events", params={"after": op_cursor}).json()["events"] == []
+
+
+def test_a_long_absence_is_delivered_in_one_poll(client, db_session) -> None:
+    """The limit is a safety bound, not a page size: draining a backlog a few
+    at a time would make the client summarise it once per poll."""
+    _user(db_session, "admin@royalchains.com", is_admin=True)
+    _user(db_session, "op@royalchains.com")
+
+    _login(client, "admin@royalchains.com")
+    cursor = client.get("/events").json()["cursor"]
+    for _ in range(30):
+        _entry(db_session, action="SUBMIT_REQUIREMENT", email="op@royalchains.com")
+
+    events = client.get("/events", params={"after": cursor}).json()["events"]
+    assert len(events) == 30, "all 30 in a single response"

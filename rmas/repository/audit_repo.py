@@ -242,7 +242,7 @@ def events_after(
     after: int,
     action_types: tuple[str, ...],
     exclude_email: str,
-    limit: int = 20,
+    limit: int = 50,
 ):
     """Successful entries newer than `after`, for the notification feed.
 
@@ -252,6 +252,11 @@ def events_after(
     `exclude_email` drops the caller's own actions: an operator does not need
     telling that they themselves just submitted, and the acting user already
     saw a confirmation banner.
+
+    The limit is a safety bound, not a page size. It is generous enough that
+    signing in after a long absence is normally satisfied by ONE poll: the
+    client summarises a burst rather than stacking it, but draining a backlog
+    twenty at a time would summarise it repeatedly, once per poll.
     """
     return list(
         db.scalars(

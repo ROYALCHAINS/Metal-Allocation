@@ -137,3 +137,47 @@ export function toastKindFor(eventKind) {
   if (eventKind === 'revision') return 'warn';
   return 'info';
 }
+
+/** Above this many in one arrival, the batch is summarised instead of stacked. */
+const MAX_INDIVIDUAL = 4;
+/** How many are still shown in full when a batch is summarised. */
+const KEPT_WHEN_SUMMARISED = 3;
+
+/**
+ * Show a group of notifications that arrived together.
+ *
+ * One at a time is the normal case and is shown as-is. A BURST is not: signing
+ * in after a day away, or after the server was restarted, can deliver a dozen
+ * at once, and since toasts no longer expire that would bury the screen in
+ * pop-ups the reader has to dismiss one by one.
+ *
+ * So past MAX_INDIVIDUAL the batch collapses: the newest few in full, plus a
+ * single line accounting for the rest. Nothing is hidden that was not also
+ * counted — the summary states exactly how many it stands for, and all of it
+ * remains in the Audit Log.
+ *
+ * @param {{message: string, kind: string}[]} items oldest first, as the server
+ *   returns them.
+ * @param {{summaryHint?: string}} [options] trailing words for the summary
+ *   line, e.g. 'while you were away'.
+ */
+export function showToastBatch(items, { summaryHint = '' } = {}) {
+  if (!items.length) return;
+
+  if (items.length <= MAX_INDIVIDUAL) {
+    items.forEach((item) => showToast(item.message, item.kind));
+    return;
+  }
+
+  const kept = items.slice(-KEPT_WHEN_SUMMARISED);
+  const hidden = items.length - kept.length;
+  const tail = summaryHint ? ` ${summaryHint}` : '';
+
+  // The summary goes FIRST, because it stands for the OLDER entries and the
+  // stack reads oldest at the top.
+  showToast(
+    `${hidden} earlier notification${hidden === 1 ? '' : 's'}${tail}. See the Audit Log for the full record.`,
+    'info'
+  );
+  kept.forEach((item) => showToast(item.message, item.kind));
+}

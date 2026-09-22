@@ -223,3 +223,46 @@ def get_children(db: Session, parent_audit_id: str) -> list[MetalAllocationAudit
             .order_by(MetalAllocationAuditLog.allocation_date)
         )
     )
+
+
+def latest_row_id(db: Session) -> int:
+    """The newest audit_row_id, or 0 on an empty log.
+
+    The cursor for the notification feed. audit_row_id rather than a timestamp
+    because action_timestamp has one-second granularity, so a timestamp cursor
+    would either replay or skip entries written inside the same second — and a
+    cascade writes several.
+    """
+    return db.scalar(select(func.max(MetalAllocationAuditLog.audit_row_id))) or 0
+
+
+def events_after(
+    db: Session,
+    *,
+    after: int,
+    action_types: tuple[str, ...],
+    exclude_email: str,
+    limit: int = 20,
+):
+    """Successful entries newer than `after`, for the notification feed.
+
+    Oldest first, so the caller can advance its cursor by taking the last id
+    and toasts arrive in the order the events happened.
+
+    `exclude_email` drops the caller's own actions: an operator does not need
+    telling that they themselves just submitted, and the acting user already
+    saw a confirmation banner.
+    """
+    return list(
+        db.scalars(
+            select(MetalAllocationAuditLog)
+            .where(
+                MetalAllocationAuditLog.audit_row_id > after,
+                MetalAllocationAuditLog.action_status == "SUCCESS",
+                MetalAllocationAuditLog.action_type.in_(action_types),
+                MetalAllocationAuditLog.user_email != exclude_email,
+            )
+            .order_by(MetalAllocationAuditLog.audit_row_id)
+            .limit(limit)
+        )
+    )

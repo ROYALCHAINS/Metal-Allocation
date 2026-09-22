@@ -19,6 +19,7 @@ from starlette.staticfiles import StaticFiles
 from config import settings
 from routers.allocations import router as allocations_router
 from routers.audit import router as audit_router
+from routers.events import router as events_router
 from routers.auth import router as auth_router
 from routers.reports import router as reports_router
 from routers.sectors import router as sectors_router
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(staging_router)
     app.include_router(reports_router)
     app.include_router(audit_router)
+    app.include_router(events_router)
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:

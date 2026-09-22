@@ -44,3 +44,15 @@ export function getNavCounts() {
 export function getDashboard(filters = {}) {
   return getJson(`/reports/dashboard${query(filters)}`);
 }
+
+/**
+ * Poll for things worth a toast — an operator's submission, or the
+ * administrator finalising a date.
+ *
+ * Call with no cursor first: the server then returns the current position and
+ * NO events, so a page load never fires a pop-up for every historical entry.
+ * Pass the returned cursor back on each subsequent call.
+ */
+export function getEvents(after = null) {
+  return getJson(`/events${after === null ? '' : query({ after })}`);
+}

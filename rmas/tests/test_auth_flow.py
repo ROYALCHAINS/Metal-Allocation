@@ -142,6 +142,124 @@ def test_inactive_account_cannot_log_in(client, db_session) -> None:
     assert response.status_code == 403
 
 
+# -------------------------------------------------- deactivation mid-session
+#
+# Refusing an inactive account at LOGIN only guards the moment of sign-in.
+# These pin the other half: a user deactivated while holding a valid session
+# loses access on their very next request, on every endpoint, rather than
+# keeping it until the cookie expires.
+
+
+def _deactivate(db_session, email: str) -> None:
+    user = db_session.query(AppUser).filter(AppUser.email == email).one()
+    user.is_active = False
+    db_session.commit()
+
+
+def test_deactivation_ends_an_existing_session(client, db_session) -> None:
+    _create_user(db_session, email="admin@royalchains.com", password=PASSWORD)
+    client.post("/auth/login", json={"email": "admin@royalchains.com", "password": PASSWORD})
+    assert client.get("/auth/me").status_code == 200, "precondition: the session works"
+
+    _deactivate(db_session, "admin@royalchains.com")
+
+    assert client.get("/auth/me").status_code == 401
+
+
+def test_deactivation_clears_the_session_rather_than_just_refusing_it(
+    client, db_session
+) -> None:
+    """The cookie must be discarded, not merely rejected on each request.
+
+    Otherwise the browser keeps presenting a credential the server has already
+    decided is dead, and reactivating the account would silently resurrect a
+    session nobody signed in for.
+    """
+    _create_user(db_session, email="admin@royalchains.com", password=PASSWORD)
+    client.post("/auth/login", json={"email": "admin@royalchains.com", "password": PASSWORD})
+    _deactivate(db_session, "admin@royalchains.com")
+
+    first = client.get("/auth/me")
+    assert first.status_code == 401
+    assert first.json()["detail"] == "This account is no longer active"
+
+    # Session cleared, so the next request has no user_id at all — a different
+    # branch, and the proof that the cookie went rather than being re-refused.
+    second = client.get("/auth/me")
+    assert second.status_code == 401
+    assert second.json()["detail"] == "Not authenticated"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/auth/me",
+        "/auth/access-diagnostics",
+        "/sectors",
+        "/allocations/2026-09-01",
+        "/reports/counts",
+        "/reports/allocation-history",
+        "/reports/dashboard",
+    ],
+)
+def test_deactivation_applies_to_every_endpoint(client, db_session, path) -> None:
+    """The gate lives in get_current_user, so it must hold everywhere that
+    depends on it — not only on the auth routes."""
+    _create_user(db_session, email="admin@royalchains.com", password=PASSWORD)
+    client.post("/auth/login", json={"email": "admin@royalchains.com", "password": PASSWORD})
+    _deactivate(db_session, "admin@royalchains.com")
+
+    assert client.get(path).status_code == 401
+
+
+def test_a_deactivated_administrator_loses_the_audit_log(client, db_session) -> None:
+    """The audit log holds identities and full before/after snapshots, so a
+    deactivated admin reaching it is the worst case of this bug. 401, not 403:
+    the session ended, so the question of admin rights never arises."""
+    _create_user(db_session, email="admin@royalchains.com", password=PASSWORD, is_admin=True)
+    client.post("/auth/login", json={"email": "admin@royalchains.com", "password": PASSWORD})
+    assert client.get("/audit").status_code == 200, "precondition: admin can read the log"
+
+    _deactivate(db_session, "admin@royalchains.com")
+
+    assert client.get("/audit").status_code == 401
+
+
+def test_a_deactivated_operator_cannot_submit(client, db_session) -> None:
+    """A write path, not just reads — deactivation must stop the ledger being
+    touched, not only stop screens rendering."""
+    _create_user(db_session, email="op@royalchains.com", password=PASSWORD, is_admin=False)
+    client.post("/auth/login", json={"email": "op@royalchains.com", "password": PASSWORD})
+    _deactivate(db_session, "op@royalchains.com")
+
+    response = client.post(
+        "/staging/2026-09-01",
+        json={"allocations": [], "metal_flow": [], "request_id": "REQ-deactivated"},
+    )
+    assert response.status_code == 401
+
+
+def test_reactivation_restores_access_on_a_fresh_login(client, db_session) -> None:
+    """Deactivation is reversible, and the fix must not strand a reinstated
+    account — it ends the session, it does not brick the user."""
+    _create_user(db_session, email="admin@royalchains.com", password=PASSWORD)
+    client.post("/auth/login", json={"email": "admin@royalchains.com", "password": PASSWORD})
+    _deactivate(db_session, "admin@royalchains.com")
+    assert client.get("/auth/me").status_code == 401
+
+    user = db_session.query(AppUser).filter(AppUser.email == "admin@royalchains.com").one()
+    user.is_active = True
+    db_session.commit()
+
+    assert (
+        client.post(
+            "/auth/login", json={"email": "admin@royalchains.com", "password": PASSWORD}
+        ).status_code
+        == 200
+    )
+    assert client.get("/auth/me").status_code == 200
+
+
 # --------------------------------------------------------- access diagnostics
 
 PASSWORD = "correct horse battery staple"

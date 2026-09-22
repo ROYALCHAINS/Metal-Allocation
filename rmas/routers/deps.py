@@ -31,6 +31,24 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> AppUser
         # The account was removed after the session was issued.
         request.session.clear()
         raise HTTPException(status_code=401, detail="Session no longer valid")
+    if not user.is_active:
+        # Deactivated AFTER the session was issued. login() refuses an inactive
+        # account (routers/auth.py), but that check alone only guards the moment
+        # of sign-in — without this one, deactivating somebody leaves them with
+        # full access, administrator access included, until their cookie expires.
+        #
+        # 401 and a cleared session rather than 403, matching the branch above:
+        # both are "this session is finished", and a 403 would claim the caller
+        # is still authenticated while we are in the act of signing them out.
+        # login() answers 403 for the same account because no session exists
+        # there to end — a different question, so a different code.
+        #
+        # Note this makes diagnose_access()'s "marked inactive" line unreachable
+        # over HTTP, since the diagnostics route also depends on this function.
+        # The line stays correct and stays tested (test_scope_service.py), and
+        # failing closed matters more than explaining why to a disabled account.
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="This account is no longer active")
     return user
 
 

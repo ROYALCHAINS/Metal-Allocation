@@ -26,7 +26,14 @@
 import { getDashboard } from '../api/reports.js';
 import { getSectors } from '../api/sectors.js';
 import { escapeHtml } from '../components/appHeader.js';
-import { groupedBarChart, kgToGrams, lineChart, sectorBarChart } from '../components/charts.js';
+import {
+  MAX_PLOT_DAYS,
+  groupedBarChart,
+  kgToGrams,
+  limitToRecentDays,
+  lineChart,
+  sectorBarChart,
+} from '../components/charts.js';
 import { bindFilterBar, renderFilterBar } from '../components/filterBar.js';
 import { fmt3, formatGrams } from '../lib/format.js';
 
@@ -279,16 +286,26 @@ export function renderAnalysisView(container) {
         return;
       }
 
-      const dates = data.by_date.map((p) => ({
+      // EVERY date-axis chart below plots this, not data.by_date: a long
+      // filter range stays whole for the KPI cards above, while the plots cap
+      // to the most recent MAX_PLOT_DAYS. Capping here rather than per chart
+      // is what stops two charts on one screen disagreeing about their axis.
+      const plotted = limitToRecentDays(data.by_date);
+      const capped = plotted.length < data.by_date.length;
+
+      const dates = plotted.map((p) => ({
         label: p.allocation_date,
         short: shortDate(p.allocation_date),
       }));
 
-      $('dbChart1Chip').textContent = `${data.by_date.length} day${
-        data.by_date.length === 1 ? '' : 's'
+      // Say so when the axis is narrower than the filter, rather than letting
+      // the chart quietly disagree with the range the reader chose.
+      const dayChip = `${plotted.length} day${plotted.length === 1 ? '' : 's'}${
+        capped ? ` (latest ${MAX_PLOT_DAYS})` : ''
       }`;
+      $('dbChart1Chip').textContent = dayChip;
       $('dbChartAcquiredAlloted').innerHTML = groupedBarChart(
-        data.by_date.map((p, i) => ({
+        plotted.map((p, i) => ({
           ...dates[i],
           a: kgToGrams(p.acquired_kg),
           b: kgToGrams(p.alloted_kg),
@@ -303,7 +320,7 @@ export function renderAnalysisView(container) {
       // figures are the latest balance and the highest it reached, which is
       // what the KPI card reports too.
       $('dbChartBalance').innerHTML = lineChart(
-        data.by_date.map((p, i) => ({ ...dates[i], value: kgToGrams(p.balance_kg) })),
+        plotted.map((p, i) => ({ ...dates[i], value: kgToGrams(p.balance_kg) })),
         {
           totals: [
             { label: 'Latest closing', value: kgToGrams(data.closing_balance_kg) },
@@ -326,7 +343,7 @@ export function renderAnalysisView(container) {
       const showFlowTrend = data.is_admin === false;
       $('dbFlowTrendCard').classList.toggle('hidden', !showFlowTrend);
       if (showFlowTrend) {
-        const points = data.by_date.map((p, i) => ({
+        const points = plotted.map((p, i) => ({
           ...dates[i],
           value: kgToGrams(p.acquired_kg),
         }));

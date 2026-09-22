@@ -333,7 +333,11 @@ def dashboard(
 
 # From legacy's REPORT_CONFIG / ReportService.gs.
 MAX_HEATMAP_DATES = 180
-HEATMAP_WINDOW_DAYS = 30
+# 31, not legacy's 30 — raised on request so every date-axis plot in the
+# application caps to the same window. The window still counts back from the
+# NEWEST MATCHED DATE rather than from today (see flow_analysis below), so a
+# range with no recent records still fills.
+HEATMAP_WINDOW_DAYS = 31
 
 
 def _cycle_schema(day_totals: dict[str, int]) -> CycleDelta:

@@ -507,3 +507,47 @@ export function flowShareChart(rows, grandTotalG) {
 export function kgToGrams(value) {
   return toGrams(value) || 0;
 }
+
+/**
+ * How many days of history any date-axis plot will draw.
+ *
+ * A long filter range is useful for the KPI cards — "total acquired over two
+ * months" is a real question — but it is not useful for a bar chart, where
+ * sixty bars in a card this wide stop being readable. Capping the PLOT and
+ * leaving the cards alone keeps both answers honest, so the totals still cover
+ * everything the filter selected while the chart shows the recent shape.
+ *
+ * Matches the Metal Flow heatmap's server-side window, so every date axis in
+ * the application shows the same span.
+ */
+export const MAX_PLOT_DAYS = 31;
+
+/**
+ * The most recent `days` CALENDAR days of a date-ordered series.
+ *
+ * A calendar window, not the last N points: "the latest 31 days" should mean
+ * the same stretch of time whether or not the business saved on every one of
+ * them. On a six-day working week this yields about 26 bars, and a gap in the
+ * ledger narrows the chart rather than silently reaching further back.
+ *
+ * The window ends at the NEWEST DATE IN THE DATA, never at today — a range
+ * whose records stop a month ago still draws a full chart instead of an empty
+ * one. That is the same rule the flow heatmap uses server-side.
+ *
+ * ISO dates compare correctly as strings, so no parsing is needed for the
+ * filter itself; only the cutoff is computed as a date.
+ */
+export function limitToRecentDays(rows, days = MAX_PLOT_DAYS) {
+  if (rows.length <= 1) return rows;
+
+  const newest = rows.reduce(
+    (max, row) => (row.allocation_date > max ? row.allocation_date : max),
+    rows[0].allocation_date
+  );
+
+  const cutoffDate = new Date(`${newest}T00:00:00Z`);
+  cutoffDate.setUTCDate(cutoffDate.getUTCDate() - (days - 1));
+  const cutoff = cutoffDate.toISOString().slice(0, 10);
+
+  return rows.filter((row) => row.allocation_date >= cutoff);
+}

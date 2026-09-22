@@ -102,7 +102,7 @@ export function renderFlowHistoryView(container) {
           <span class="chip" id="mfHeatChip">&mdash;</span>
         </div>
         <p class="chart-card__subtitle">
-          Daily acquired kilograms by Metal Flow party, for the last 30 days of the
+          Daily acquired kilograms by Metal Flow party, for the last 31 days of the
           selected range. Darker cells indicate higher acquisition.
         </p>
         <div class="chart-card__body">
